@@ -72,6 +72,34 @@ from numpy import genfromtxt
 
 from pytadbit.utils.file_handling import which
 
+def binless(interaction_files, tmp_dir='.', **kwargs):
+    script_path = which('normalize_binless.R')
+    proc_par = ["Rscript", "--vanilla", script_path]
+    out_bias_csv = path.join(tmp_dir,'biases.csv')
+    out_decay_csv = path.join(tmp_dir,'decay.csv')
+    out_signal_csv = path.join(tmp_dir,'signal.csv')
+    configfile = path.join(tmp_dir,'config_binless.r')
+    with open(configfile, "w") as output:
+        output.write('''infiles = c(%s)\n'''
+                     % ', '.join('"{0}"'.format(path.abspath(w)) for w in interaction_files))
+        for key, val in kwargs.items():
+            if key == "read_lens":
+                output.write('''read_lens = c(%s)\n'''
+                             % ', '.join('{0}'.format(sk) for sk in val))
+                continue
+            output.write('''%s = '%s'\n''' % (key,val))
+        output.write('''output_bias = '%s'\n''' % path.abspath(out_bias_csv))
+        output.write('''output_decay = '%s'\n ''' % path.abspath(out_decay_csv))
+        output.write('''output_signal = '%s' ''' % path.abspath(out_signal_csv))
+    proc_par.append(configfile)
+    proc = Popen(proc_par, stderr=PIPE)
+    err = proc.stderr.readlines()
+    print '\n'.join(err)
+
+    biases_binless = genfromtxt(out_bias_csv, delimiter=',', dtype=float)
+    decay_binless = genfromtxt(out_decay_csv, delimiter=',', dtype=float)
+
+    return biases_binless, decay_binless, path.abspath(out_signal_csv)
 
 def oneD(tmp_dir='.', form='tot ~ s(map) + s(cg) + s(res)', **kwargs):
     """

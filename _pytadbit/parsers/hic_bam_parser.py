@@ -11,6 +11,7 @@ from subprocess                   import Popen, PIPE
 from random                       import getrandbits
 from tarfile                      import open as taropen
 from StringIO                     import StringIO
+from math                         import floor, sqrt
 import datetime
 from sys                          import stdout, stderr, exc_info
 from distutils.version            import LooseVersion
@@ -582,14 +583,22 @@ def get_biases_region(biases, bin_coords):
     if isinstance(biases, str):
         biases = load(open(biases))
     decay = biases.get('decay' , {})
-    # load biases and bad columns
-    bias1  = dict((k - start_bin1, v)
-                  for k, v in biases.get('biases', {}).iteritems()
-                  if start_bin1 <= k < end_bin1)
+    biases_type = biases.get('biases_type', 'column')
+    # load biases and bad columns 
+    if biases_type  == 'matrix':
+        bias = biases.get('biases')
+        N = floor(sqrt(2*len(bias)))
+        bias1  = dict((k - (start_bin1*N+start_bin2), v)
+                      for k, v in bias.iteritems()
+                      if start_bin1 <= k and start_bin2 <= k and end_bin1 > k and end_bin2 > k)
+    else: 
+        bias1  = dict((k - start_bin1, v)
+                      for k, v in biases.get('biases', {}).iteritems()
+                      if start_bin1 <= k < end_bin1)
     bads1  = dict((k - start_bin1, v)
                   for k, v in biases.get('badcol', {}).iteritems()
                   if start_bin1 <= k < end_bin1)
-    if start_bin1 != start_bin2:
+    if start_bin1 != start_bin2 and biases_type != 'matrix':
         bias2  = dict((k - start_bin2, v)
                       for k, v in biases.get('biases', {}).iteritems()
                       if start_bin2 <= k < end_bin2)
@@ -670,14 +679,19 @@ def get_matrix(inbam, resolution, biases=None,
     if verbose:
         printime('  - Getting matrices')
 
+    biases_type = biases.get('biases_type', 'column') 
+    N = None
+    if biases_type  == 'matrix':
+        N = floor(sqrt(2*len(biases.get('biases'))))
+    
     def transform_value_raw(_, __ , ___, v):
         return v
     def transform_value_norm(_, a, b, v):
-        return v / bias1[a] / bias2[b]
+        return v / (bias1[a] / bias2[b] if not N else bias1[a*N+b]) 
     def transform_value_decay(c, a, b, v):
-        return v / bias1[a] / bias2[b] / decay[c][abs(a-b)]
+        return v / (bias1[a] / bias2[b] if not N else bias1[a*N+b]) / decay[c][abs(a-b)]
     def transform_value_decay_2reg(c, a, b, v):
-        return v / bias1[a] / bias2[b] / decay[c][abs((a + start_bin1) - (b + start_bin2))]
+        return v / (bias1[a] / bias2[b] if not N else bias1[a*N+b]) / decay[c][abs((a + start_bin1) - (b + start_bin2))]
 
     if normalization == 'raw':
         transform_value = transform_value_raw

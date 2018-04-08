@@ -32,7 +32,7 @@ from pytadbit.parsers.hic_bam_parser      import filters_to_bin
 from pytadbit.parsers.bed_parser          import parse_mappability_bedGraph
 from pytadbit.utils.extraviews            import nicer
 from pytadbit.utils.hic_filtering         import filter_by_cis_percentage
-from pytadbit.utils.normalize_hic         import oneD
+from pytadbit.utils.normalize_hic         import oneD, binless
 from pytadbit.mapping.restriction_enzymes import RESTRICTION_ENZYMES
 from pytadbit.parsers.genome_parser       import parse_fasta, get_gc_content
 
@@ -127,12 +127,66 @@ def run(opts):
         # out.close()
         # compute GC content ~30 sec
         # TODO: read from DB
-    biases, decay, badcol, raw_cisprc, norm_cisprc = read_bam(
-        mreads, filter_exclude, opts.reso, min_count=opts.min_count, sigma=2,
-        factor=1, outdir=outdir, extra_out=param_hash, ncpus=opts.cpus,
-        normalization=opts.normalization, mappability=mappability,
-        cg_content=gc_content, n_rsites=n_rsites, min_perc=opts.min_perc, max_perc=opts.max_perc,
-        normalize_only=opts.normalize_only, max_njobs=opts.max_njobs, extra_bads=opts.badcols)
+    signal_mat = None
+    if opts.normalization == 'binless':
+        infiles = []
+        if opts.binless_jobids:
+            for jbi in opts.binless_jobids:
+                opts.jobid = jbi
+                infiles.append(path.join(opts.workdir, load_parameters_fromdb(opts)))
+        else:
+            infiles.append(mreads)
+        if len(infiles) == 0:
+            raise Exception('ERROR: missing intersection files for binless normalization.\n' +
+            'Use binless_jobids.')
+        if not opts.renz:
+            raise Exception('ERROR: missing restriction enzyme name for binless normalization')
+        if not opts.binless_locus:
+            raise Exception('ERROR: missing locus for binless normalization')
+        filter_exclude = filters_to_bin([7, 9])
+        print 'WARNING: applying filters 7,9 for binless.\n' 
+        chrom = beg = end = None
+        if ':' in opts.binless_locus:
+            chrom, ebc = opts.binless_locus.split(':')
+            beg, end = map(int, ebc.split('-'))
+        else:
+            chrom = opts.binless_locus
+            beg = 1
+            end = float("inf")
+        read_lens = []
+        tmp_binless = path.join(outdir,'tmp_binless_%s' % (param_hash))
+        mkdir(tmp_binless)
+        infiles_tsv = []
+        for i, infile in enumerate(infiles):
+            infile_tsv, read_len = extract_tsv_from_bam(infile,
+                                filter_exclude=filter_exclude, outdir=tmp_binless,
+                                extra_out=str(i), region=chrom, start=beg, end=end)
+            infiles_tsv.append(infile_tsv)
+            read_lens.append(read_len)
+        decay = {}
+        biases, decay[chrom], sign_mat = binless(tmp_dir=tmp_binless,
+                      interaction_files=infiles_tsv,
+                      fast_binless=False, chr=chrom,
+                      beg=beg, end=end, resolution=opts.reso,
+                      enzyme=opts.renz, read_lens=read_lens)
+        biases = dict((k, b) for k, b in enumerate(biases))
+        decay[chrom] = dict((k, b) for k, b in enumerate(decay[chrom]))
+        try:
+            signal_mat = path.join(outdir,'signal_%s.csv' % (param_hash))
+            copyfile(sign_mat,signal_mat)
+        except IOError:
+            pass
+        rmtree(tmp_binless)
+        badcol = {}
+        raw_cisprc = 0
+        norm_cisprc = 0
+    else:
+        biases, decay, badcol, raw_cisprc, norm_cisprc = read_bam(
+            mreads, filter_exclude, opts.reso, min_count=opts.min_count, sigma=2,
+            factor=1, outdir=outdir, extra_out=param_hash, ncpus=opts.cpus,
+            normalization=opts.normalization, mappability=mappability,
+            cg_content=gc_content, n_rsites=n_rsites, min_perc=opts.min_perc, max_perc=opts.max_perc,
+            normalize_only=opts.normalize_only, max_njobs=opts.max_njobs, extra_bads=opts.badcols)
 
     bad_col_image = path.join(outdir, 'filtered_bins_%s_%s.png' % (
         nicer(opts.reso).replace(' ', ''), param_hash))
@@ -159,6 +213,8 @@ def run(opts):
     out = open(bias_file, 'w')
 
     dump({'biases'    : biases,
+          'biases_type' : 'column' if opts.normalization != 'binless' else 'matrix',
+          'locus'     : opts.binless_locus if opts.binless_locus else None,
           'decay'     : decay,
           'badcol'    : badcol,
           'resolution': opts.reso}, out)
@@ -170,7 +226,7 @@ def run(opts):
         save_to_db(opts, bias_file, mreads, bad_col_image,
                    len(badcol), len(biases), raw_cisprc, norm_cisprc,
                    inter_vs_gcoord, a2, opts.filter,
-                   launch_time, finish_time)
+                   launch_time, finish_time, signal_mat)
     except:
         # release lock anyway
         print_exc()
@@ -185,7 +241,7 @@ def run(opts):
 def save_to_db(opts, bias_file, mreads, bad_col_image,
                nbad_columns, ncolumns, raw_cisprc, norm_cisprc,
                inter_vs_gcoord, a2, bam_filter,
-               launch_time, finish_time):
+               launch_time, finish_time, signal_mat = None):
     if 'tmpdb' in opts and opts.tmpdb:
         # check lock
         while path.exists(path.join(opts.workdir, '__lock_db')):
@@ -253,6 +309,8 @@ def save_to_db(opts, bias_file, mreads, bad_col_image,
             pass
         jobid = get_jobid(cur)
         add_path(cur, bias_file       , 'BIASES'     , jobid, opts.workdir)
+        if signal_mat:
+            add_path(cur, signal_mat   , 'SIGNAL'     , jobid, opts.workdir)
         add_path(cur, bad_col_image   , 'FIGURE'     , jobid, opts.workdir)
         add_path(cur, inter_vs_gcoord , 'FIGURE'     , jobid, opts.workdir)
         if opts.bam:
@@ -408,14 +466,15 @@ def populate_args(parser):
 
     normpt.add_argument('--normalization', dest='normalization', metavar="STR",
                         action='store', default='Vanilla', type=str,
-                        choices=['Vanilla', 'oneD'],
+                        choices=['Vanilla', 'oneD', 'binless'],
                         help='''[%(default)s] normalization(s) to apply.
                         Order matters. Choices: [%(choices)s]''')
 
     normpt.add_argument('--mappability', dest='mappability', action='store', default=None,
                         metavar='PATH', type=str,
-                        help='''R|Path to mappability bedGraph file, required for oneD normalization.
-Mappability file can be generated with GEM (example from the genomic fasta file hg38.fa):\n
+                        help='''R|Path to mappability bedGraph file, required for oneD \n 
+     normalization. Mappability file can be generated with GEM (example \n
+     from the genomic fasta file hg38.fa):\n
      gem-indexer -i hg38.fa -o hg38
      gem-mappability -I hg38.gem -l 50 -o hg38.50mer -T 8
      gem-2-wig -I hg38.gem -i hg38.50mer.mappability -o hg38.50mer
@@ -427,11 +486,26 @@ Mappability file can be generated with GEM (example from the genomic fasta file 
                         help='''Path to fasta file with genome sequence, to compute
                         GC content and number of restriction sites per bin.
                         Required for oneD normalization''')
-
+    
+    normpt.add_argument('--binless_jobids', dest='binless_jobids', metavar="INT",
+                        nargs='+', default=None, type=int,
+                        help='''Use as input data generated by jobs with given
+                        jobids.\ne.g.: '--binless_jobids 3 6. 
+                        Use tadbit describe to find out which ones.\n
+                        Required for binless normalization''')
+    
+    normpt.add_argument('--binless_locus', dest='binless_locus', 
+                        type=str, default=None, metavar='CHR:POS1-POS2',
+                        help=('locus to normalize with binless (in'
+                              'genomic position). e.g.: --binless_locus'
+                              ' chr1:150000000-160000000. It can be also just the chromosome.'
+                              ' eg.: --binless_locus chr1.'
+                              'Required for binless normalization'))
+    
     normpt.add_argument('--renz', dest='renz', metavar="STR",
                         type=str, required=False,
-                        help='''restriction enzyme name(s). Required for oneD
-                        normalization''')
+                        help='''restriction enzyme name(s). Required for oneD and 
+                        binless normalization''')
 
     normpt.add_argument('--factor', dest='factor', metavar="NUM",
                         action='store', default=1, type=float,
@@ -639,7 +713,62 @@ def read_bam_frag_filter(inbam, filter_exclude, all_bins, sections,
         print e
         print(exc_type, fname, exc_tb.tb_lineno)
 
-
+def extract_tsv_from_bam(inbam, filter_exclude, region, start, end, extra_out='', outdir='.'):
+    bamfile = AlignmentFile(inbam, 'rb')
+    refs = bamfile.references
+    try:
+        fnam = path.join(outdir,
+                             'tmp_%s:%d-%d_%s.tsv' % (region, start, end, extra_out))
+        out = open(fnam, 'w')
+        read_i = 0
+        read_length = {}
+        for r in bamfile.fetch(region=region,
+                               start=start - (1 if start else 0), end=end,  # coords starts at 0
+                               multiple_iterators=True):
+            if len(r.tags) < 7:
+                raise Exception("ERROR: bam file does not contain all the needed information.\n"
+                        "Use tadbit filter with --binless_filter option")
+            if r.flag & filter_exclude:
+                continue
+            crm1 = r.reference_name
+            pos1 = r.reference_start + 1
+            crm2 = refs[r.mrnm]
+            pos2 = r.mpos + 1
+            if crm1 == region and crm2 == region and start <= pos1 <= end and start <= pos2 <= end:
+                le1, le2 = map(int, (r.cigar[0][1], r.template_length))
+                if le1 in read_length:
+                    read_length[le1] += 1
+                else:
+                    read_length[le1] = 1
+                if le2 in read_length:
+                    read_length[le2] += 1
+                else:
+                    read_length[le2] = 1
+                read_i += 1
+                line = ('{0}\t{1}\t{2}\t{3}\t{4}\t{5}\t{6}\t{7}\t'
+                        '{8}\t{9}\t{10}\t{11}\t{12}\n').format(
+                    r.qname,
+                    crm1,
+                    pos1,
+                    r.tags[1][1],
+                    le1,
+                    r.tags[3][1],
+                    r.tags[4][1],
+                    crm2,
+                    pos2,
+                    r.tags[2][1],
+                    le2,
+                    r.tags[5][1],
+                    r.tags[6][1])
+                out.write(line)
+        out.close()
+    except Exception, e:
+        exc_type, exc_obj, exc_tb = exc_info()
+        fname = path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print e
+        print(exc_type, fname, exc_tb.tb_lineno)    
+    return fnam, max(read_length, key=read_length.get)
+    
 def read_bam(inbam, filter_exclude, resolution, min_count=2500,
              normalization='Vanilla', mappability=None, n_rsites=None,
              cg_content=None, sigma=2, ncpus=8, factor=1, outdir='.',

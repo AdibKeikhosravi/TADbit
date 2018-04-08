@@ -388,6 +388,10 @@ def populate_args(parser):
     glopts.add_argument('--samtools', dest='samtools', metavar="PATH",
                         action='store', default='samtools', type=str,
                         help='''path samtools binary''')
+    filter_.add_argument('--binless_filter', dest='binless_filter', action='store_true',
+                        default=False,
+                        help ='''[%(default)s] apply filtering for binless normalization''')
+
 
     parser.add_argument_group(glopts)
 
@@ -401,7 +405,12 @@ def check_options(opts):
     if not path.exists(opts.workdir) and opts.resume:
         print 'WARNING: can use output files, found, not resuming...'
         opts.resume = False
-
+    
+    # override apply and format for binless
+    if opts.binless_filter:
+        print 'WARNING: overriding filters and BAM format for binless normalization...'
+        opts.apply = [7, 9]
+        opts.format = 'long'
     # sort filters
     if opts.apply:
         opts.apply.sort()
