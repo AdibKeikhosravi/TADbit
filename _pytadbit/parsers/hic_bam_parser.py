@@ -587,7 +587,7 @@ def get_biases_region(biases, bin_coords):
     # load biases and bad columns 
     if biases_type  == 'matrix':
         bias = biases.get('biases')
-        N = floor(sqrt(2*len(bias)))
+        N = int(floor(sqrt(2*len(bias))))
         bias1  = dict((k - (start_bin1*N+start_bin2), v)
                       for k, v in bias.iteritems()
                       if start_bin1 <= k and start_bin2 <= k and end_bin1 > k and end_bin2 > k)
@@ -682,7 +682,7 @@ def get_matrix(inbam, resolution, biases=None,
     biases_type = biases.get('biases_type', 'column') 
     N = None
     if biases_type  == 'matrix':
-        N = floor(sqrt(2*len(biases.get('biases'))))
+        N = int(floor(sqrt(2*len(biases.get('biases')))))
     
     def transform_value_raw(_, __ , ___, v):
         return v
@@ -827,6 +827,10 @@ def write_matrix(inbam, resolution, biases, outdir,
 
     if biases:
         bias1, bias2, decay, bads1, bads2 = get_biases_region(biases, bin_coords)
+        biases_type = biases.get('biases_type', 'column') 
+        N = None
+        if biases_type  == 'matrix':
+            N = int(floor(sqrt(2*len(biases.get('biases')))))
     elif normalizations != ('raw', ):
         raise Exception('ERROR: should provide path to file with biases (pickle).')
     else:
@@ -913,29 +917,29 @@ def write_matrix(inbam, resolution, biases, outdir,
     def write_bias(func=None):
         def writer2(c, a, b, v):
             func(c, a, b, v)
-            out_nrm.write('{}\t{}\t{}\n'.format(a, b, v / bias1[a] / bias2[b]))
+            out_nrm.write('{}\t{}\t{}\n'.format(a, b, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b])))
         def writer(_, a, b, v):
-            out_nrm.write('{}\t{}\t{}\n'.format(a, b, v / bias1[a] / bias2[b]))
+            out_nrm.write('{}\t{}\t{}\n'.format(a, b, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b])))
         return writer2 if func else writer
 
     def write_expc(func=None):
         def writer2(c, a, b, v):
             func(c, a, b, v)
             out_dec.write('{}\t{}\t{}\n'.format(
-                a, b, v / bias1[a] / bias2[b] / decay[c][abs(a-b)]))
+                a, b, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b]) / decay[c][abs(a-b)]))
         def writer(c, a, b, v):
             out_dec.write('{}\t{}\t{}\n'.format(
-                a, b, v / bias1[a] / bias2[b] / decay[c][abs(a-b)]))
+                a, b, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b]) / decay[c][abs(a-b)]))
         return writer2 if func else writer
 
     def write_expc_2reg(func=None):
         def writer2(c, a, b, v):
             func(c, a, b, v)
             out_dec.write('{}\t{}\t{}\n'.format(
-                a, b, v / bias1[a] / bias2[b] / decay[c][abs((a + start_bin1) - (b + start_bin2))]))
+                a, b, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b]) / decay[c][abs((a + start_bin1) - (b + start_bin2))]))
         def writer(c, a, b, v):
             out_dec.write('{}\t{}\t{}\n'.format(
-                a, b, v / bias1[a] / bias2[b] / decay[c][abs((a + start_bin1) - (b + start_bin2))]))
+                a, b, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b]) / decay[c][abs((a + start_bin1) - (b + start_bin2))]))
         return writer2 if func else writer
 
     def write_expc_err(func=None):
@@ -943,13 +947,13 @@ def write_matrix(inbam, resolution, biases, outdir,
             func(c, a, b, v)
             try:
                 out_dec.write('{}\t{}\t{}\n'.format(
-                    a, b, v / bias1[a] / bias2[b] / decay[c][abs(a-b)]))
+                    a, b, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b]) / decay[c][abs(a-b)]))
             except KeyError:  # different chromosomes
                 out_dec.write('{}\t{}\t{}\n'.format(a, b, 'nan'))
         def writer(c, a, b, v):
             try:
                 out_dec.write('{}\t{}\t{}\n'.format(
-                    a, b, v / bias1[a] / bias2[b] / decay[c][abs(a-b)]))
+                    a, b, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b]) / decay[c][abs(a-b)]))
             except KeyError:  # different chromosomes
                 out_dec.write('{}\t{}\t{}\n'.format(a, b, 'nan'))
         return writer2 if func else writer
@@ -959,17 +963,17 @@ def write_matrix(inbam, resolution, biases, outdir,
             func(c, a, b, v)
             try:
                 out_dec.write('{}\t{}\t{}\t{}\n'.format(
-                    a, b, v, v / bias1[a] / bias2[b] / decay[c][abs(a-b)]))
+                    a, b, v, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b]) / decay[c][abs(a-b)]))
             except KeyError:  # different chromosomes
                 out_dec.write('{}\t{}\t{}\t{}\n'.format(
-                    a, b, v, v / bias1[a] / bias2[b]))
+                    a, b, v, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b])))
         def writer(c, a, b, v):
             try:
                 out_dec.write('{}\t{}\t{}\t{}\n'.format(
-                    a, b, v, v / bias1[a] / bias2[b] / decay[c][abs(a-b)]))
+                    a, b, v, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b]) / decay[c][abs(a-b)]))
             except KeyError:  # different chromosomes
                 out_dec.write('{}\t{}\t{}\t{}\n'.format(
-                    a, b, v, v / bias1[a] / bias2[b]))
+                    a, b, v, v / (bias1[a] / bias2[b] if not N else bias1[a*N+b])))
         return writer2 if func else writer
 
     write = None

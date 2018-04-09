@@ -89,7 +89,7 @@ def binless(interaction_files, tmp_dir='.', **kwargs):
                 continue
             output.write('''%s = '%s'\n''' % (key,val))
         output.write('''output_bias = '%s'\n''' % path.abspath(out_bias_csv))
-        output.write('''output_decay = '%s'\n ''' % path.abspath(out_decay_csv))
+        output.write('''output_decay = '%s'\n''' % path.abspath(out_decay_csv))
         output.write('''output_signal = '%s' ''' % path.abspath(out_signal_csv))
     proc_par.append(configfile)
     proc = Popen(proc_par, stderr=PIPE)

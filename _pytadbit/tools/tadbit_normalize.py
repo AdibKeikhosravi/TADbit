@@ -158,7 +158,7 @@ def run(opts):
         mkdir(tmp_binless)
         infiles_tsv = []
         for i, infile in enumerate(infiles):
-            infile_tsv, read_len = extract_tsv_from_bam(infile,
+            infile_tsv, read_len, read_end = extract_tsv_from_bam(infile,
                                 filter_exclude=filter_exclude, outdir=tmp_binless,
                                 extra_out=str(i), region=chrom, start=beg, end=end)
             infiles_tsv.append(infile_tsv)
@@ -167,7 +167,7 @@ def run(opts):
         biases, decay[chrom], sign_mat = binless(tmp_dir=tmp_binless,
                       interaction_files=infiles_tsv,
                       fast_binless=False, chr=chrom,
-                      beg=beg, end=end, resolution=opts.reso,
+                      beg=beg, end=read_end, resolution=opts.reso,
                       enzyme=opts.renz, read_lens=read_lens)
         biases = dict((k, b) for k, b in enumerate(biases))
         decay[chrom] = dict((k, b) for k, b in enumerate(decay[chrom]))
@@ -717,13 +717,17 @@ def extract_tsv_from_bam(inbam, filter_exclude, region, start, end, extra_out=''
     bamfile = AlignmentFile(inbam, 'rb')
     refs = bamfile.references
     try:
-        fnam = path.join(outdir,
-                             'tmp_%s:%d-%d_%s.tsv' % (region, start, end, extra_out))
+        try:
+            fnam = path.join(outdir,
+                                 'tmp_%s:%d-%d_%s.tsv' % (region, start, end, extra_out))
+        except TypeError:
+            fnam = path.join(outdir,
+                                 'tmp_%s_%s.tsv' % (region, extra_out))
         out = open(fnam, 'w')
         read_i = 0
         read_length = {}
         for r in bamfile.fetch(region=region,
-                               start=start - (1 if start else 0), end=end,  # coords starts at 0
+                               start=start - (1 if start else 0), end=(end if end != float('inf') else None),  # coords starts at 0
                                multiple_iterators=True):
             if len(r.tags) < 7:
                 raise Exception("ERROR: bam file does not contain all the needed information.\n"
@@ -766,8 +770,8 @@ def extract_tsv_from_bam(inbam, filter_exclude, region, start, end, extra_out=''
         exc_type, exc_obj, exc_tb = exc_info()
         fname = path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print e
-        print(exc_type, fname, exc_tb.tb_lineno)    
-    return fnam, max(read_length, key=read_length.get)
+        print(exc_type, fname, exc_tb.tb_lineno)
+    return fnam, max(read_length, key=read_length.get), max(pos1,pos2)
     
 def read_bam(inbam, filter_exclude, resolution, min_count=2500,
              normalization='Vanilla', mappability=None, n_rsites=None,
