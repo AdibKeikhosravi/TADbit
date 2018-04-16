@@ -127,7 +127,7 @@ def run(opts):
         # out.close()
         # compute GC content ~30 sec
         # TODO: read from DB
-    signal_mat = None
+    signal_mat = bin_coords = None
     if opts.normalization == 'binless':
         infiles = []
         if opts.binless_jobids:
@@ -144,7 +144,7 @@ def run(opts):
         if not opts.binless_locus:
             raise Exception('ERROR: missing locus for binless normalization')
         filter_exclude = filters_to_bin([7, 9])
-        print 'WARNING: applying filters 7,9 for binless.\n' 
+        print 'WARNING: applying filters 7,9 for binless.\n'
         chrom = beg = end = None
         if ':' in opts.binless_locus:
             chrom, ebc = opts.binless_locus.split(':')
@@ -158,9 +158,10 @@ def run(opts):
         mkdir(tmp_binless)
         infiles_tsv = []
         for i, infile in enumerate(infiles):
-            infile_tsv, read_len, read_end = extract_tsv_from_bam(infile,
-                                filter_exclude=filter_exclude, outdir=tmp_binless,
-                                extra_out=str(i), region=chrom, start=beg, end=end)
+            infile_tsv, read_len, read_end, bin_coords = extract_tsv_from_bam(infile,
+                                filter_exclude=filter_exclude, resolution=opts.reso,
+                                outdir=tmp_binless, extra_out=str(i), region=chrom,
+                                start=beg, end=end)
             infiles_tsv.append(infile_tsv)
             read_lens.append(read_len)
         decay = {}
@@ -178,8 +179,8 @@ def run(opts):
             pass
         rmtree(tmp_binless)
         badcol = {}
-        raw_cisprc = 0
-        norm_cisprc = 0
+        raw_cisprc = norm_cisprc = a2 = 0
+        bad_col_image = inter_vs_gcoord = None
     else:
         biases, decay, badcol, raw_cisprc, norm_cisprc = read_bam(
             mreads, filter_exclude, opts.reso, min_count=opts.min_count, sigma=2,
@@ -188,23 +189,23 @@ def run(opts):
             cg_content=gc_content, n_rsites=n_rsites, min_perc=opts.min_perc, max_perc=opts.max_perc,
             normalize_only=opts.normalize_only, max_njobs=opts.max_njobs, extra_bads=opts.badcols)
 
-    bad_col_image = path.join(outdir, 'filtered_bins_%s_%s.png' % (
-        nicer(opts.reso).replace(' ', ''), param_hash))
-
-    inter_vs_gcoord = path.join(opts.workdir, '04_normalization',
-                                'interactions_vs_genomic-coords.png_%s_%s.png' % (
-                                    opts.reso, param_hash))
-
-    # get and plot decay
-    if not opts.normalize_only:
-        printime('  - Computing interaction decay vs genomic distance')
-        (_, _, _), (a2, _, _), (_, _, _) = plot_distance_vs_interactions(
-            decay, max_diff=10000, resolution=opts.reso, normalized=not opts.filter_only,
-            savefig=inter_vs_gcoord)
-
-        print ('    -> Decay slope 0.7-10 Mb\t%s' % a2)
-    else:
-        a2 = 0.
+        bad_col_image = path.join(outdir, 'filtered_bins_%s_%s.png' % (
+            nicer(opts.reso).replace(' ', ''), param_hash))
+    
+        inter_vs_gcoord = path.join(opts.workdir, '04_normalization',
+                                    'interactions_vs_genomic-coords.png_%s_%s.png' % (
+                                        opts.reso, param_hash))
+    
+        # get and plot decay
+        if not opts.normalize_only:
+            printime('  - Computing interaction decay vs genomic distance')
+            (_, _, _), (a2, _, _), (_, _, _) = plot_distance_vs_interactions(
+                decay, max_diff=10000, resolution=opts.reso, normalized=not opts.filter_only,
+                savefig=inter_vs_gcoord)
+    
+            print ('    -> Decay slope 0.7-10 Mb\t%s' % a2)
+        else:
+            a2 = 0.
 
     printime('  - Saving biases and badcol columns')
     # biases
@@ -214,7 +215,7 @@ def run(opts):
 
     dump({'biases'    : biases,
           'biases_type' : 'column' if opts.normalization != 'binless' else 'matrix',
-          'locus'     : opts.binless_locus if opts.binless_locus else None,
+          'bin_coords'     : bin_coords if bin_coords else None,
           'decay'     : decay,
           'badcol'    : badcol,
           'resolution': opts.reso}, out)
@@ -713,9 +714,18 @@ def read_bam_frag_filter(inbam, filter_exclude, all_bins, sections,
         print e
         print(exc_type, fname, exc_tb.tb_lineno)
 
-def extract_tsv_from_bam(inbam, filter_exclude, region, start, end, extra_out='', outdir='.'):
+def extract_tsv_from_bam(inbam, filter_exclude, resolution, region, start, end, extra_out='', outdir='.'):
     bamfile = AlignmentFile(inbam, 'rb')
     refs = bamfile.references
+    sections = OrderedDict(zip(bamfile.references,
+                               [x / resolution + 1 for x in bamfile.lengths]))
+    total = 0
+    section_pos = dict()
+    for crm in sections:
+        section_pos[crm] = (total, total + sections[crm])
+        total += sections[crm]
+    bin_coords = (section_pos[region][0] + start / resolution, 
+                  section_pos[region][0] + end / resolution)
     try:
         try:
             fnam = path.join(outdir,
@@ -724,7 +734,7 @@ def extract_tsv_from_bam(inbam, filter_exclude, region, start, end, extra_out=''
             fnam = path.join(outdir,
                                  'tmp_%s_%s.tsv' % (region, extra_out))
         out = open(fnam, 'w')
-        read_i = 0
+        last_pos = 0
         read_length = {}
         for r in bamfile.fetch(region=region,
                                start=start - (1 if start else 0), end=(end if end != float('inf') else None),  # coords starts at 0
@@ -738,7 +748,7 @@ def extract_tsv_from_bam(inbam, filter_exclude, region, start, end, extra_out=''
             pos1 = r.reference_start + 1
             crm2 = refs[r.mrnm]
             pos2 = r.mpos + 1
-            if crm1 == region and crm2 == region and start <= pos1 <= end and start <= pos2 <= end:
+            if crm1 == region and crm2 == region and start <= pos1 < end and start <= pos2 < end:
                 le1, le2 = map(int, (r.cigar[0][1], r.template_length))
                 if le1 in read_length:
                     read_length[le1] += 1
@@ -748,7 +758,7 @@ def extract_tsv_from_bam(inbam, filter_exclude, region, start, end, extra_out=''
                     read_length[le2] += 1
                 else:
                     read_length[le2] = 1
-                read_i += 1
+                last_pos = max(pos1,pos2)
                 line = ('{0}\t{1}\t{2}\t{3}\t{4}\t{5}\t{6}\t{7}\t'
                         '{8}\t{9}\t{10}\t{11}\t{12}\n').format(
                     r.qname,
@@ -771,7 +781,7 @@ def extract_tsv_from_bam(inbam, filter_exclude, region, start, end, extra_out=''
         fname = path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print e
         print(exc_type, fname, exc_tb.tb_lineno)
-    return fnam, max(read_length, key=read_length.get), max(pos1,pos2)
+    return fnam, max(read_length, key=read_length.get), last_pos, bin_coords
     
 def read_bam(inbam, filter_exclude, resolution, min_count=2500,
              normalization='Vanilla', mappability=None, n_rsites=None,

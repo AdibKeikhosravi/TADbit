@@ -77,6 +77,7 @@ def binless(interaction_files, tmp_dir='.', **kwargs):
     proc_par = ["Rscript", "--vanilla", script_path]
     out_bias_csv = path.join(tmp_dir,'biases.csv')
     out_decay_csv = path.join(tmp_dir,'decay.csv')
+    out_distance_csv = path.join(tmp_dir,'distance.csv')
     out_signal_csv = path.join(tmp_dir,'signal.csv')
     configfile = path.join(tmp_dir,'config_binless.r')
     with open(configfile, "w") as output:
@@ -90,6 +91,7 @@ def binless(interaction_files, tmp_dir='.', **kwargs):
             output.write('''%s = '%s'\n''' % (key,val))
         output.write('''output_bias = '%s'\n''' % path.abspath(out_bias_csv))
         output.write('''output_decay = '%s'\n''' % path.abspath(out_decay_csv))
+        output.write('''output_distance = '%s'\n''' % path.abspath(out_distance_csv))
         output.write('''output_signal = '%s' ''' % path.abspath(out_signal_csv))
     proc_par.append(configfile)
     proc = Popen(proc_par, stderr=PIPE)
@@ -98,8 +100,10 @@ def binless(interaction_files, tmp_dir='.', **kwargs):
 
     biases_binless = genfromtxt(out_bias_csv, delimiter=',', dtype=float)
     decay_binless = genfromtxt(out_decay_csv, delimiter=',', dtype=float)
+    distance_binless = genfromtxt(out_distance_csv, delimiter=',', dtype=float)
+    decay = dict((d,v) for d,v in zip(distance_binless,decay_binless))
 
-    return biases_binless, decay_binless, path.abspath(out_signal_csv)
+    return biases_binless, decay, path.abspath(out_signal_csv)
 
 def oneD(tmp_dir='.', form='tot ~ s(map) + s(cg) + s(res)', **kwargs):
     """

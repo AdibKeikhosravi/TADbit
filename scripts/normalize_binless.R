@@ -51,8 +51,11 @@ tol=1e-1 #relative tolerance on computed quantities upon convergence
 cs <- normalize_binless(cs, ngibbs = ngibbs, ncores = ncores, base.res = base.res, bg.steps = bg.steps, tol = tol)
 cs=bin_all_datasets(cs, ncores=ncores)
 mat=get_binned_matrices(cs)
-write.table(exp(mat$observed)/exp(mat$normalized),file = output_bias,row.names = FALSE,col.names = FALSE,sep = ',')
-write.table(exp(cs@par$decay$log_decay),file = output_decay,row.names = FALSE,col.names = FALSE,sep = ',')
+mat=mat[begin1<=as.integer(end) & begin2<=as.integer(end)]
+write.table(mat$biasmat,file = output_bias,row.names = FALSE,col.names = FALSE,sep = ',')
+write.table(mat$decaymat,file = output_decay,row.names = FALSE,col.names = FALSE,sep = ',')
+write.table(cs@par$decay$distance,file = output_distance,row.names = FALSE,col.names = FALSE,sep = ',')
 cs=detect_binless_interactions(cs, ncores=ncores)
 mat=get_binless_interactions(cs)
+mat=mat[begin1<=as.integer(end) & begin2<=as.integer(end)]
 write.table(mat$signal,file = output_signal,row.names = FALSE,col.names = FALSE,sep = ',')
