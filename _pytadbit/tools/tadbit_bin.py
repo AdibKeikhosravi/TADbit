@@ -20,7 +20,7 @@ import time
 
 import sqlite3 as lite
 from numpy                           import zeros_like, dstack, min as np_min
-from numpy                           import nonzero, array, linspace, isnan
+from numpy                           import nonzero, array, linspace, isnan, nan
 from numpy                           import nanmin, nanmax, ma, log2, isfinite
 from numpy                           import genfromtxt, tril, triu_indices, zeros
 from matplotlib                      import pyplot as plt
@@ -171,11 +171,13 @@ def run(opts):
                     biases_binless = load(open(biases))
                     bin_coords = (biases_binless['bin_coords'][0],biases_binless['bin_coords'][1],
                                   biases_binless['bin_coords'][0],biases_binless['bin_coords'][1])
-                    signal = genfromtxt(signal_csv, delimiter=',', dtype=float)
+                    signal = genfromtxt(signal_csv, delimiter=',', dtype=float)    
                     N = int(floor(sqrt(2*len(signal))))
                     matrix = zeros((N, N))
                     matrix[triu_indices(N, 0)] = signal
                     matrix = tril(matrix.T,-1) + matrix
+                    if opts.signal_threshold:
+                        matrix[matrix<(2**opts.signal_threshold)] = nan
                     bads1 = bads2 = {}
                     norm = 'signal'
                 else:
@@ -637,10 +639,16 @@ def populate_args(parser):
     rfiltr.add_argument('--valid', dest='only_valid', action='store_true',
                         default=False,
                         help='input BAM file contains only valid pairs (already filtered).')
-    
+
     outopt.add_argument('--signal', dest='signal', action='store_true',
                         default=False,
-                        help='[%(default)s] Retrieve signal matrix from binless normalization.')
+                        help="""[%(default)s] Retrieve signal matrix (estimated to be significantly
+                        different from the background model) from binless normalization.
+                        Signal is a fold change.""")
+        
+    outopt.add_argument('--signal_threshold', dest='signal_threshold', metavar="NUM",
+                        action='store', default=None, type=float, required=False,
+                        help='''show only signal above signal_threshold log2 fold change''')
 
 
 def load_parameters_fromdb(opts):

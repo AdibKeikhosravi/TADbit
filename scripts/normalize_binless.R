@@ -8,17 +8,24 @@ if (length(args)<1) {
 
 source(args[1])
 
-if (exists("fast_binless")) { 
-	fast_binless = (fast_binless=='True')
-} else {
-	fast_binless = F
-}
+if (exists("fast_binless")) fast_binless = (fast_binless=='True') else fast_binless = F
 if (exists("chr") && exists("beg") && exists("end")) {
 	locus = c(paste(chr),as.integer(beg),as.integer(end))
 } else {
 	locus = NULL
 }
+if (exists("bf_per_kb")) bf_per_kb=as.integer(bf_per_kb) else bf_per_kb=50 
+if (exists("bf_per_decade")) bf_per_decade=as.integer(bf_per_decade) else bf_per_decade=10
+if (exists("bins_per_bf")) bins_per_bf=as.integer(bins_per_bf) else bins_per_bf=10
+if (exists("ngibbs")) ngibbs=as.integer(ngibbs) else ngibbs=15 #maximum number of iterations
+if (exists("bg.steps")) bg.steps=as.integer(bg.steps) else bg.steps=5 #maximum number of steps where only the background model is fitted
+if (exists("iter")) iter=as.integer(iter) else iter=100
+if (exists("tol")) tol=as.numeric(ngibbs) else tol=1e-1 #relative tolerance on computed quantities upon convergence
+if (exists("ncores")) ncores=as.integer(ncores) else ncores=4 #parallelize on so many processors
+if (exists("nperf")) nperf=as.integer(nperf) else nperf=50
+
 resolution = as.integer(resolution)
+base.res=resolution #base resolution for the fused lasso signal detection
 name="TADbit norm"
 
 library(binless)
@@ -43,19 +50,15 @@ foreach (i=1:length(infiles)) %do% {
 	allcsd = c(allcsd,csd)
 }
 cs=merge_cs_norm_datasets(allcsd, different.decays="none")
-ncores=4 #parallelize on so many processors
-ngibbs=15 #maximum number of iterations
-base.res=resolution #base resolution for the fused lasso signal detection
-bg.steps=5 #maximum number of steps where only the background model is fitted
-tol=1e-1 #relative tolerance on computed quantities upon convergence
-cs <- normalize_binless(cs, ngibbs = ngibbs, ncores = ncores, base.res = base.res, bg.steps = bg.steps, tol = tol)
+cs <- normalize_binless(cs, ngibbs = ngibbs, ncores = ncores, base.res = base.res, bg.steps = bg.steps, tol = tol,
+						bf_per_kb = bf_per_kb, bf_per_decade = bf_per_decade, bins_per_bf = bins_per_bf, iter=iter)
 cs=bin_all_datasets(cs, ncores=ncores)
 mat=get_binned_matrices(cs)
 mat=mat[begin1<=as.integer(end) & begin2<=as.integer(end)]
 write.table(mat$biasmat,file = output_bias,row.names = FALSE,col.names = FALSE,sep = ',')
 write.table(mat$decaymat[1:mat[,nlevels(bin1)]],file = output_decay,row.names = FALSE,col.names = FALSE,sep = ',')
 write.table(cs@par$decay$distance,file = output_distance,row.names = FALSE,col.names = FALSE,sep = ',')
-cs=detect_binless_interactions(cs, ncores=ncores)
+cs=detect_binless_interactions(cs, ncores = ncores, nperf = nperf)
 mat=get_binless_interactions(cs)
 mat=mat[begin1<=as.integer(end) & begin2<=as.integer(end)]
 write.table(mat$signal,file = output_signal,row.names = FALSE,col.names = FALSE,sep = ',')
