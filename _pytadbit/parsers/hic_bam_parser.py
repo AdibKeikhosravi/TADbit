@@ -600,7 +600,7 @@ def get_biases_region(biases, bin_coords):
         N = int(floor(sqrt(2*len(bias))))
         bias1 = zeros((N, N))
         bias1[triu_indices(N, 0)] = array(bias.values())
-        bias1 = tril(bias1.T,1) + bias1
+        bias1 = tril(bias1.T,-1) + bias1
         bias2 = None
     else:
         bias1  = dict((k - start_bin1, v)

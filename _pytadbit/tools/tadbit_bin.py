@@ -11,6 +11,7 @@ from sys                             import stdout
 from shutil                          import copyfile
 from string                          import ascii_letters
 from random                          import random
+from math                            import floor, sqrt
 from cPickle                         import load
 from warnings                        import warn
 from multiprocessing                 import cpu_count
@@ -21,6 +22,7 @@ import sqlite3 as lite
 from numpy                           import zeros_like, dstack, min as np_min
 from numpy                           import nonzero, array, linspace, isnan
 from numpy                           import nanmin, nanmax, ma, log2, isfinite
+from numpy                           import genfromtxt, tril, triu_indices, zeros
 from matplotlib                      import pyplot as plt
 from matplotlib.ticker               import FuncFormatter
 from pysam                           import AlignmentFile
@@ -57,11 +59,15 @@ def run(opts):
                             ' biases file.')
         biases = opts.biases
     else:
-        biases, mreads = load_parameters_fromdb(opts)
+        biases, mreads, signal_csv = load_parameters_fromdb(opts)
         mreads = path.join(opts.workdir, mreads)
         biases = path.join(opts.workdir, biases) if biases else None
+        signal_csv = path.join(opts.workdir, signal_csv) if signal_csv else None
     if opts.biases:
         biases = opts.biases
+    
+    if opts.signal and not signal_csv:
+        raise Exception('ERROR: no signal found.')
 
     coord1         = opts.coord1
     coord2         = opts.coord2
@@ -138,7 +144,7 @@ def run(opts):
     out_files = {}
     out_plots = {}
 
-    if opts.matrix or opts.plot:
+    if opts.matrix or opts.plot or opts.signal:
         bamfile = AlignmentFile(mreads, 'rb')
         sections = OrderedDict(zip(bamfile.references,
                                    [x for x in bamfile.lengths]))
@@ -149,19 +155,40 @@ def run(opts):
             total += sections[crm]
         for norm in opts.normalizations:
             norm_string = ('RAW' if norm == 'raw' else 'NRM'
-                           if norm == 'norm' else 'DEC')
+                           if norm == 'norm' else 'SIGNAL'
+                           if norm == 'signal' else 'DEC')
             printime('Getting %s matrices' % norm)
             try:
-                matrix, bads1, bads2, regions, name, bin_coords = get_matrix(
-                    mreads, opts.reso,
-                    load(open(biases)) if biases and norm != 'raw' else None,
-                    normalization=norm,
-                    region1=region1, start1=start1, end1=end1,
-                    region2=region2, start2=start2, end2=end2,
-                    tmpdir=tmpdir, ncpus=opts.cpus,
-                    return_headers=True,
-                    nchunks=opts.nchunks, verbose=not opts.quiet,
-                    clean=clean)
+                if opts.signal:
+                    name = []
+                    try:
+                        name.append('%s:%d-%d' % (region1, start1 / opts.reso,
+                                                end1 / opts.reso))
+                    except TypeError: # whole chromosome
+                        name.append('%s' % (region1))
+                    name = '_'.join(name)
+                    regions = [region1]
+                    biases_binless = load(open(biases))
+                    bin_coords = (biases_binless['bin_coords'][0],biases_binless['bin_coords'][1],
+                                  biases_binless['bin_coords'][0],biases_binless['bin_coords'][1])
+                    signal = genfromtxt(signal_csv, delimiter=',', dtype=float)
+                    N = int(floor(sqrt(2*len(signal))))
+                    matrix = zeros((N, N))
+                    matrix[triu_indices(N, 0)] = signal
+                    matrix = tril(matrix.T,-1) + matrix
+                    bads1 = bads2 = {}
+                    norm = 'signal'
+                else:
+                    matrix, bads1, bads2, regions, name, bin_coords = get_matrix(
+                        mreads, opts.reso,
+                        load(open(biases)) if biases and norm != 'raw' else None,
+                        normalization=norm,
+                        region1=region1, start1=start1, end1=end1,
+                        region2=region2, start2=start2, end2=end2,
+                        tmpdir=tmpdir, ncpus=opts.cpus,
+                        return_headers=True,
+                        nchunks=opts.nchunks, verbose=not opts.quiet,
+                        clean=clean)
             except NotImplementedError:
                 if norm == "raw&decay":
                     warn('WARNING: raw&decay normalization not implemeted for '
@@ -179,6 +206,8 @@ def run(opts):
                                             ends[r] if r < len(ends) and ends[r] else sections[reg],
                                             opts.reso))
             if opts.matrix:
+                if opts.signal:
+                    matrix = dict(((i,j),matrix[i,j]) for i in xrange(N) for j in xrange(N))
                 printime(' - Writing: %s' % norm)
                 fnam = '%s_%s_%s%s.mat' % (norm, name,
                                            nicer(opts.reso, sep=''),
@@ -218,9 +247,13 @@ def run(opts):
                 # ax1 = plt.subplot(111)
                 ax1 = plt.axes([0.1, 0.1, 0.7, 0.8])
                 ax2 = plt.axes([0.82, 0.1, 0.07, 0.8])
-                matrix = array([array([matrix.get((i, j), 0) for i in xrange(b1, e1)])
-                                for j in xrange(b2, e2)])
-                mini = np_min(matrix[nonzero(matrix)]) / 2.
+                if not opts.signal:
+                    matrix = array([array([matrix.get((i, j), 0) for i in xrange(b1, e1)])
+                                    for j in xrange(b2, e2)])
+                try:
+                    mini = np_min(matrix[nonzero(matrix)]) / 2.
+                except ValueError:
+                    mini = 0
                 matrix[matrix==0] = mini
                 m = zeros_like(matrix)
                 for bad1 in bads1:
@@ -293,16 +326,20 @@ def run(opts):
                     ax1.set_xlim(-0.5, len(matrix[0]) - 0.5)
                     ax1.set_ylim(-0.5, len(matrix) - 0.5)
                 data = [i for d in matrix for i in d if isfinite(i)]
-                mindata = nanmin(data)
-                maxdata = nanmax(data)
-                gradient = linspace(maxdata, mindata, max((len(matrix),
+                try:
+                    mindata = nanmin(data)
+                    maxdata = nanmax(data)
+                    gradient = linspace(maxdata, mindata, max((len(matrix),
                                                            len(matrix[0]))))
-                gradient = dstack((gradient, gradient))[0]
-                h  = ax2.hist(data, color='darkgrey', linewidth=2,
-                              orientation='horizontal',
-                              bins=50, histtype='step', density=True)
-                _  = ax2.imshow(gradient, aspect='auto', cmap=cmap,
-                                extent=(0, max(h[0]), mindata, maxdata))
+                    gradient = dstack((gradient, gradient))[0]
+                    h  = ax2.hist(data, color='darkgrey', linewidth=2,
+                                  orientation='horizontal',
+                                  bins=50, histtype='step', density=True)
+                    _  = ax2.imshow(gradient, aspect='auto', cmap=cmap,
+                                    extent=(0, max(h[0]), mindata, maxdata))
+                except ValueError:
+                    pass
+                
                 ax2.yaxis.tick_right()
                 ax2.yaxis.set_label_position("right")
                 ax2.set_xticks([])
@@ -419,7 +456,7 @@ def check_options(opts):
 
     # transform filtering reads option
     opts.filter = filters_to_bin(opts.filter)
-
+        
     # enlight plotting parameter writing
     if opts.only_plot:
         opts.plot = True
@@ -427,6 +464,12 @@ def check_options(opts):
         opts.plot = True
         opts.only_plot = True
 
+    if opts.signal:
+        opts.normalizations = ['signal']
+        if not opts.plot and not opts.matrix:
+            opts.plot = True
+            opts.only_plot = True
+            warn('WARNING: setting plot output for signal matrix...')
     # check resume
     if not path.exists(opts.workdir):
         raise IOError('ERROR: workdir not found.')
@@ -594,6 +637,10 @@ def populate_args(parser):
     rfiltr.add_argument('--valid', dest='only_valid', action='store_true',
                         default=False,
                         help='input BAM file contains only valid pairs (already filtered).')
+    
+    outopt.add_argument('--signal', dest='signal', action='store_true',
+                        default=False,
+                        help='[%(default)s] Retrieve signal matrix from binless normalization.')
 
 
 def load_parameters_fromdb(opts):
@@ -610,7 +657,7 @@ def load_parameters_fromdb(opts):
                 cur.execute("""
                 select distinct Id from JOBs
                 where Type = '%s'
-                """ % ('Normalize' if opts.normalizations != ['raw'] else 'Filter'))
+                """ % ('Normalize' if opts.normalizations != ['raw'] or opts.signal else 'Filter'))
                 jobids = cur.fetchall()
                 parse_jobid = jobids[0][0]
             except IndexError:
@@ -646,14 +693,21 @@ def load_parameters_fromdb(opts):
             parse_jobid = opts.jobid
         # fetch path to parsed BED files
         # try:
-        biases = mreads = reso = None
-        if len(opts.normalizations) > 1 or opts.normalizations[0] != 'raw':
+        biases = mreads = reso = signal = None
+        if len(opts.normalizations) > 1 or opts.normalizations[0] != 'raw' or opts.signal:
             try:
                 cur.execute("""
                 select distinct Path from PATHs
                 where paths.jobid = %s and paths.Type = 'BIASES'
                 """ % parse_jobid)
                 biases = cur.fetchall()[0][0]
+                
+                if opts.signal:
+                    cur.execute("""
+                    select distinct Path from PATHs
+                    where paths.jobid = %s and paths.Type = 'SIGNAL'
+                    """ % parse_jobid)
+                    signal = cur.fetchone()[0]
 
                 cur.execute("""
                 select distinct Path from PATHs
@@ -691,4 +745,4 @@ def load_parameters_fromdb(opts):
             if len(fetched) > 1:
                 raise Exception('ERROR: more than one item in the database')
             mreads = fetched[0][0]
-        return biases, mreads
+        return biases, mreads, signal

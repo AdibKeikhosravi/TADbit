@@ -53,7 +53,7 @@ cs=bin_all_datasets(cs, ncores=ncores)
 mat=get_binned_matrices(cs)
 mat=mat[begin1<=as.integer(end) & begin2<=as.integer(end)]
 write.table(mat$biasmat,file = output_bias,row.names = FALSE,col.names = FALSE,sep = ',')
-write.table(mat$decaymat,file = output_decay,row.names = FALSE,col.names = FALSE,sep = ',')
+write.table(mat$decaymat[1:mat[,nlevels(bin1)]],file = output_decay,row.names = FALSE,col.names = FALSE,sep = ',')
 write.table(cs@par$decay$distance,file = output_distance,row.names = FALSE,col.names = FALSE,sep = ',')
 cs=detect_binless_interactions(cs, ncores=ncores)
 mat=get_binless_interactions(cs)
