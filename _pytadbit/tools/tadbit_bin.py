@@ -8,7 +8,7 @@ information needed
 from argparse                        import HelpFormatter
 from os                              import path, remove, system
 from sys                             import stdout
-from shutil                          import copyfile
+from shutil                          import copyfile, rmtree
 from string                          import ascii_letters
 from random                          import random
 from math                            import floor, sqrt
@@ -34,6 +34,7 @@ from pytadbit.parsers.hic_bam_parser import write_matrix, get_matrix
 from pytadbit.utils.sqlite_utils     import already_run, digest_parameters
 from pytadbit.utils.sqlite_utils     import add_path, get_jobid, print_db
 from pytadbit.utils.extraviews       import tadbit_savefig, nicer
+from pytadbit.utils.binless_utils    import binless_signal_detection
 
 
 DESC = 'bin Hi-C data into matrices'
@@ -59,15 +60,15 @@ def run(opts):
                             ' biases file.')
         biases = opts.biases
     else:
-        biases, mreads, signal_csv = load_parameters_fromdb(opts)
+        biases, mreads, rdata = load_parameters_fromdb(opts)
         mreads = path.join(opts.workdir, mreads)
         biases = path.join(opts.workdir, biases) if biases else None
-        signal_csv = path.join(opts.workdir, signal_csv) if signal_csv else None
+        rdata = path.join(opts.workdir, rdata) if rdata else None
     if opts.biases:
         biases = opts.biases
     
-    if opts.signal and not signal_csv:
-        raise Exception('ERROR: no signal found.')
+    if opts.signal and not rdata:
+        raise Exception('ERROR: no binless normalization data found.')
 
     coord1         = opts.coord1
     coord2         = opts.coord2
@@ -143,7 +144,9 @@ def run(opts):
 
     out_files = {}
     out_plots = {}
-
+    
+    signal_mat = None
+    
     if opts.matrix or opts.plot or opts.signal:
         bamfile = AlignmentFile(mreads, 'rb')
         sections = OrderedDict(zip(bamfile.references,
@@ -171,7 +174,12 @@ def run(opts):
                     biases_binless = load(open(biases))
                     bin_coords = (biases_binless['bin_coords'][0],biases_binless['bin_coords'][1],
                                   biases_binless['bin_coords'][0],biases_binless['bin_coords'][1])
-                    signal = genfromtxt(signal_csv, delimiter=',', dtype=float)    
+                    tmp_binless = path.join(outdir,'_tmp_binless_%s' % (param_hash))
+                    mkdir(tmp_binless)
+                    signal_csv  = binless_signal_detection(rdata=rdata,
+                                    tmp_dir=tmp_binless, resolution=opts.reso,
+                                    region=region1, start=start1, end=end1)
+                    signal = genfromtxt(signal_csv, delimiter=',', dtype=float)
                     N = int(floor(sqrt(2*len(signal))))
                     matrix = zeros((N, N))
                     matrix[triu_indices(N, 0)] = signal
@@ -180,6 +188,7 @@ def run(opts):
                         matrix[matrix<(2**opts.signal_threshold)] = nan
                     bads1 = bads2 = {}
                     norm = 'signal'
+                    rmtree(tmp_binless)
                 else:
                     matrix, bads1, bads2, regions, name, bin_coords = get_matrix(
                         mreads, opts.reso,
@@ -374,10 +383,10 @@ def run(opts):
     if not opts.interactive:
         printime('Saving to DB')
         finish_time = time.localtime()
-        save_to_db(opts, launch_time, finish_time, out_files, out_plots)
+        save_to_db(opts, launch_time, finish_time, out_files, out_plots, signal_mat)
 
 
-def save_to_db(opts, launch_time, finish_time, out_files, out_plots):
+def save_to_db(opts, launch_time, finish_time, out_files, out_plots, signal_mat = None):
     if 'tmpdb' in opts and opts.tmpdb:
         # check lock
         while path.exists(path.join(opts.workdir, '__lock_db')):
@@ -439,6 +448,8 @@ def save_to_db(opts, launch_time, finish_time, out_files, out_plots):
             add_path(cur, out_files[fnam], fnam + '_MATRIX', jobid, opts.workdir)
         for fnam in out_plots:
             add_path(cur, out_plots[fnam], fnam + '_FIGURE', jobid, opts.workdir)
+        if signal_mat:
+            add_path(cur, signal_mat   , 'SIGNAL'     , jobid, opts.workdir)
         if not opts.quiet:
             print_db(cur, 'JOBs')
             print_db(cur, 'PATHs')
@@ -645,10 +656,15 @@ def populate_args(parser):
                         help="""[%(default)s] Retrieve signal matrix (estimated to be significantly
                         different from the background model) from binless normalization.
                         Signal is a fold change.""")
-        
+
     outopt.add_argument('--signal_threshold', dest='signal_threshold', metavar="NUM",
                         action='store', default=None, type=float, required=False,
                         help='''show only signal above signal_threshold log2 fold change''')
+
+    outopt.add_argument('--dataset_index', dest='dataset_index', metavar="INT",
+                        action='store', default=0, type=int, required=False,
+                        help='''index of the biases in case of jov with
+                         multiple datasets (binless)''')
 
 
 def load_parameters_fromdb(opts):
@@ -701,7 +717,7 @@ def load_parameters_fromdb(opts):
             parse_jobid = opts.jobid
         # fetch path to parsed BED files
         # try:
-        biases = mreads = reso = signal = None
+        biases = mreads = reso = rdata = None
         if len(opts.normalizations) > 1 or opts.normalizations[0] != 'raw' or opts.signal:
             try:
                 cur.execute("""
@@ -709,13 +725,14 @@ def load_parameters_fromdb(opts):
                 where paths.jobid = %s and paths.Type = 'BIASES'
                 """ % parse_jobid)
                 biases = cur.fetchall()[0][0]
-                
+                if isinstance(biases, list):
+                    biases = biases[opts.dataset_index]
                 if opts.signal:
                     cur.execute("""
                     select distinct Path from PATHs
-                    where paths.jobid = %s and paths.Type = 'SIGNAL'
+                    where paths.jobid = %s and paths.Type = 'RDATA'
                     """ % parse_jobid)
-                    signal = cur.fetchone()[0]
+                    rdata = cur.fetchone()[0]
 
                 cur.execute("""
                 select distinct Path from PATHs
@@ -753,4 +770,4 @@ def load_parameters_fromdb(opts):
             if len(fetched) > 1:
                 raise Exception('ERROR: more than one item in the database')
             mreads = fetched[0][0]
-        return biases, mreads, signal
+        return biases, mreads, rdata

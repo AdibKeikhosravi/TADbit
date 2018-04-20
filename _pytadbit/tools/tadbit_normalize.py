@@ -50,6 +50,8 @@ def run(opts):
     if opts.bam:
         mreads = path.realpath(opts.bam)
     else:
+        if opts.binless_jobids:
+            opts.jobid = opts.binless_jobids[0]
         mreads = path.join(opts.workdir, load_parameters_fromdb(opts))
 
     filter_exclude = opts.filter
@@ -127,7 +129,7 @@ def run(opts):
         # out.close()
         # compute GC content ~30 sec
         # TODO: read from DB
-    signal_mat = bin_coords = None
+    bin_coords = rdata = None
     if opts.normalization == 'binless':
         infiles = []
         if opts.binless_jobids:
@@ -168,17 +170,25 @@ def run(opts):
         if opts.binless_args:
             binless_args = dict((k,v) for k,v in (b.split('=') for b in opts.binless_args))
         decay = {}
-        biases, decay[chrom], sign_mat = binless(tmp_dir=tmp_binless,
+        biases, decay[chrom], rdata_orig = binless(tmp_dir=tmp_binless,
                       interaction_files=infiles_tsv,
                       fast_binless=False, chr=chrom,
                       beg=beg, end=read_end, resolution=opts.reso,
                       enzyme=opts.renz, read_lens=read_lens,
                       **binless_args)
-        biases = dict((k, b) for k, b in enumerate(biases))
         decay[chrom] = dict((k, b) for k, b in enumerate(decay[chrom]))
+        if len(infiles) == 1:
+            biases = dict((k, b) for k, b in enumerate(biases))
+            
+        else:
+            size_bias = len(biases)/len(infiles)
+            arr_biases = []
+            for i in xrange(len(infiles)):
+                arr_biases.append(dict((k-i*size_bias, b) for k, b in enumerate(biases) if k > i*size_bias and k < (i+1)*size_bias))
+            biases = arr_biases
         try:
-            signal_mat = path.join(outdir,'signal_%s.csv' % (param_hash))
-            copyfile(sign_mat,signal_mat)
+            rdata = path.join(outdir,'binless_%s.RData' % (param_hash))
+            copyfile(rdata_orig,rdata)
         except IOError:
             pass
         rmtree(tmp_binless)
@@ -195,18 +205,18 @@ def run(opts):
 
         bad_col_image = path.join(outdir, 'filtered_bins_%s_%s.png' % (
             nicer(opts.reso).replace(' ', ''), param_hash))
-    
+
         inter_vs_gcoord = path.join(opts.workdir, '04_normalization',
                                     'interactions_vs_genomic-coords.png_%s_%s.png' % (
                                         opts.reso, param_hash))
-    
+
         # get and plot decay
         if not opts.normalize_only:
             printime('  - Computing interaction decay vs genomic distance')
             (_, _, _), (a2, _, _), (_, _, _) = plot_distance_vs_interactions(
                 decay, max_diff=10000, resolution=opts.reso, normalized=not opts.filter_only,
                 savefig=inter_vs_gcoord)
-    
+
             print ('    -> Decay slope 0.7-10 Mb\t%s' % a2)
         else:
             a2 = 0.
@@ -231,7 +241,7 @@ def run(opts):
         save_to_db(opts, bias_file, mreads, bad_col_image,
                    len(badcol), len(biases), raw_cisprc, norm_cisprc,
                    inter_vs_gcoord, a2, opts.filter,
-                   launch_time, finish_time, signal_mat)
+                   launch_time, finish_time, rdata)
     except:
         # release lock anyway
         print_exc()
@@ -246,7 +256,7 @@ def run(opts):
 def save_to_db(opts, bias_file, mreads, bad_col_image,
                nbad_columns, ncolumns, raw_cisprc, norm_cisprc,
                inter_vs_gcoord, a2, bam_filter,
-               launch_time, finish_time, signal_mat = None):
+               launch_time, finish_time, rdata = None):
     if 'tmpdb' in opts and opts.tmpdb:
         # check lock
         while path.exists(path.join(opts.workdir, '__lock_db')):
@@ -314,8 +324,8 @@ def save_to_db(opts, bias_file, mreads, bad_col_image,
             pass
         jobid = get_jobid(cur)
         add_path(cur, bias_file       , 'BIASES'     , jobid, opts.workdir)
-        if signal_mat:
-            add_path(cur, signal_mat   , 'SIGNAL'     , jobid, opts.workdir)
+        if rdata:
+            add_path(cur, rdata   , 'RDATA'     , jobid, opts.workdir)
         add_path(cur, bad_col_image   , 'FIGURE'     , jobid, opts.workdir)
         add_path(cur, inter_vs_gcoord , 'FIGURE'     , jobid, opts.workdir)
         if opts.bam:
