@@ -11,10 +11,10 @@ if (length(args)<4) {
   args[5] = "oneD_biases.csv"
 }
 
-tot = read.csv(args[1], head=FALSE,sep=",")
-map = read.csv(args[2], head=FALSE,sep=",")
-res = read.csv(args[3], head=FALSE,sep=",")
-cg  = read.csv(args[4], head=FALSE,sep=",")
+tot = read.csv(args[1], head=FALSE, sep=",", na.strings=c("NA", "NaN", "nan"))
+map = read.csv(args[2], head=FALSE, sep=",", na.strings=c("NA", "NaN", "nan"))
+res = read.csv(args[3], head=FALSE, sep=",", na.strings=c("NA", "NaN", "nan"))
+cg  = read.csv(args[4], head=FALSE, sep=",", na.strings=c("NA", "NaN", "nan"))
 
 info = data.frame(t(tot),t(map),t(res),t(cg))
 colnames(info) = c("tot","map","res","cg")

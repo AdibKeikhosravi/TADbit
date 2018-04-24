@@ -59,26 +59,89 @@ if(action == 'normalize') {
 	save(cs,file=paste(rdata))
 	cs=bin_all_datasets(cs, ncores=ncores)
 	mat=get_binned_matrices(cs)
-	mat=mat[begin1<=as.integer(end) & begin2<=as.integer(end)]
-	write.table(mat$biasmat,file = output_bias,row.names = FALSE,col.names = FALSE,sep = ',')
-	write.table(mat$decaymat[1:mat[,nlevels(bin1)]],file = output_decay,row.names = FALSE,col.names = FALSE,sep = ',')
-	write.table(cs@par$decay$distance,file = output_distance,row.names = FALSE,col.names = FALSE,sep = ',')
+	#mat=mat[begin1<=as.integer(end) & begin2<=as.integer(end)]
+	mat_biasmat = mat$biasmat
+	length_dset = length(mat_biasmat)/length(infiles)
+	nbins = (as.integer(end)-as.integer(beg))/resolution
+	b_nbins = as.integer(floor(sqrt(2*length_dset)))
+	if(b_nbins > nbins) {
+		seq_bins = c()
+		p = 1
+		for (i in 1:length(infiles)) {
+			for (a in 1:b_nbins) {
+				for (b in a:b_nbins) {
+					if(a<=nbins && b<=nbins) {
+						seq_bins = c(seq_bins,p)
+					}
+					p=p+1
+				}	
+			}
+		}
+		mat_biasmat = mat_biasmat[seq_bins]
+	}
+	write.table(mat$decaymat[1:nbins],file = output_decay,row.names = FALSE,col.names = FALSE,sep = ',')
+	write.table(cs@par$decay$distance[1:nbins],file = output_distance,row.names = FALSE,col.names = FALSE,sep = ',')
+	write.table(mat_biasmat,file = output_bias,row.names = FALSE,col.names = FALSE,sep = ',')
 } else if(action == 'signal') {
 	if (exists("nperf")) nperf=as.integer(nperf) else nperf=50
+	if (exists("dataset_index")) dataset_index=as.integer(dataset_index) else dataset_index=0
 	load(paste(rdata))
 	cs=bin_all_datasets(cs, ncores=ncores)
 	cs=detect_binless_interactions(cs, ncores = ncores, nperf = nperf)
 	mat=get_binless_interactions(cs)
 	mat=mat[begin1>=as.integer(start) & begin2>=as.integer(start) & begin1<=as.integer(end) & begin2<=as.integer(end)]
-	write.table(mat$signal,file = output_signal,row.names = FALSE,col.names = FALSE,sep = ',')	
+	mat_signal = mat$signal
+	length_dset = length(mat_signal)/cs@experiments[,.N]
+	nbins = (as.integer(end)-as.integer(start))/as.integer(resolution)
+	b_nbins = as.integer(floor(sqrt(2*length_dset)))
+	if(b_nbins > nbins) {
+		seq_bins = c()
+		p = 1
+		for (i in 1:cs@experiments[,.N]) {
+			for (a in 1:b_nbins) {
+				for (b in a:b_nbins) {
+					if(a<=nbins && b<=nbins) {
+						seq_bins = c(seq_bins,p)
+					}
+					p=p+1
+				}	
+			}
+		}
+		mat_signal = mat_signal[seq_bins]
+	}
+	if(cs@experiments[,.N] > 1) {
+		mat_signal = mat_signal[(1+length_dset*dataset_index):(length_dset*(dataset_index+1))]
+	}
+	write.table(mat_signal,file = output_signal,row.names = FALSE,col.names = FALSE,sep = ',')	
 } else if(action == 'difference') {
 	load(paste(rdata))
 	if(cs@experiments[,.N] < 2) {
 		cat("*** Dataset only contains one experiment. Use tadbit normalize with multiple jobids\n")
 	} else {
 		ref = cs@experiments[1,name]
+		cs=bin_all_datasets(cs, ncores=ncores)
 		cs=detect_binless_differences(cs, ref = ref, ncores=ncores)
 		mat=get_binless_differences(cs, ref = ref)
-		write.table(mat$signal,file = output_signal,row.names = FALSE,col.names = FALSE,sep = ',')
+		mat=mat[begin1>=as.integer(start) & begin2>=as.integer(start) & begin1<=as.integer(end) & begin2<=as.integer(end)]
+		mat_diff = mat$difference
+		length_dset = length(mat_diff)
+		nbins = (as.integer(end)-as.integer(start))/as.integer(resolution)
+		b_nbins = as.integer(floor(sqrt(2*length_dset)))
+		if(b_nbins > nbins) {
+		  seq_bins = c()
+		  p = 1
+		  for (i in 1:cs@experiments[,.N]) {
+		    for (a in 1:b_nbins) {
+		      for (b in a:b_nbins) {
+		        if(a<=nbins && b<=nbins) {
+		          seq_bins = c(seq_bins,p)
+		        }
+		        p=p+1
+		      }	
+		    }
+		  }
+		  mat_diff = mat_diff[seq_bins]
+		}
+		write.table(mat_diff,file = output_signal,row.names = FALSE,col.names = FALSE,sep = ',')
 	}
 }

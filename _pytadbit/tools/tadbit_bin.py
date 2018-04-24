@@ -66,8 +66,12 @@ def run(opts):
         rdata = path.join(opts.workdir, rdata) if rdata else None
     if opts.biases:
         biases = opts.biases
-    
-    if opts.signal and not rdata:
+    biases_arr = None
+    if biases:
+        biases_arr = load(open(biases))
+        if isinstance(biases_arr['biases'], list):
+            biases_arr['biases'] = biases_arr['biases'][opts.dataset_index]
+    if (opts.signal or opts.signal_difference) and not rdata:
         raise Exception('ERROR: no binless normalization data found.')
 
     coord1         = opts.coord1
@@ -147,7 +151,7 @@ def run(opts):
     
     signal_mat = None
     
-    if opts.matrix or opts.plot or opts.signal:
+    if opts.matrix or opts.plot or opts.signal or opts.signal_difference:
         bamfile = AlignmentFile(mreads, 'rb')
         sections = OrderedDict(zip(bamfile.references,
                                    [x for x in bamfile.lengths]))
@@ -162,7 +166,7 @@ def run(opts):
                            if norm == 'signal' else 'DEC')
             printime('Getting %s matrices' % norm)
             try:
-                if opts.signal:
+                if opts.signal or opts.signal_difference:
                     name = []
                     try:
                         name.append('%s:%d-%d' % (region1, start1 / opts.reso,
@@ -171,18 +175,19 @@ def run(opts):
                         name.append('%s' % (region1))
                     name = '_'.join(name)
                     regions = [region1]
-                    biases_binless = load(open(biases))
-                    bin_coords = (biases_binless['bin_coords'][0],biases_binless['bin_coords'][1],
-                                  biases_binless['bin_coords'][0],biases_binless['bin_coords'][1])
+                    bin_coords = (biases_arr['bin_coords'][0],biases_arr['bin_coords'][1],
+                                  biases_arr['bin_coords'][0],biases_arr['bin_coords'][1])
                     tmp_binless = path.join(outdir,'_tmp_binless_%s' % (param_hash))
                     mkdir(tmp_binless)
                     signal_csv  = binless_signal_detection(rdata=rdata,
+                                    action=('difference' if opts.signal_difference else 'signal'),
                                     tmp_dir=tmp_binless, resolution=opts.reso,
-                                    region=region1, start=start1, end=end1)
+                                    region=region1, start=start1, end=end1,
+                                    dataset_index=opts.dataset_index)
                     signal = genfromtxt(signal_csv, delimiter=',', dtype=float)
-                    N = int(floor(sqrt(2*len(signal))))
-                    matrix = zeros((N, N))
-                    matrix[triu_indices(N, 0)] = signal
+                    nbins = int(floor(sqrt(2*len(signal))))
+                    matrix = zeros((nbins, nbins))
+                    matrix[triu_indices(nbins, 0)] = signal
                     matrix = tril(matrix.T,-1) + matrix
                     if opts.signal_threshold:
                         matrix[matrix<(2**opts.signal_threshold)] = nan
@@ -192,7 +197,7 @@ def run(opts):
                 else:
                     matrix, bads1, bads2, regions, name, bin_coords = get_matrix(
                         mreads, opts.reso,
-                        load(open(biases)) if biases and norm != 'raw' else None,
+                        biases_arr if biases_arr and norm != 'raw' else None,
                         normalization=norm,
                         region1=region1, start1=start1, end1=end1,
                         region2=region2, start2=start2, end2=end2,
@@ -217,7 +222,7 @@ def run(opts):
                                             ends[r] if r < len(ends) and ends[r] else sections[reg],
                                             opts.reso))
             if opts.matrix:
-                if opts.signal:
+                if opts.signal or opts.signal_difference:
                     matrix = dict(((i,j),matrix[i,j]) for i in xrange(N) for j in xrange(N))
                 printime(' - Writing: %s' % norm)
                 fnam = '%s_%s_%s%s.mat' % (norm, name,
@@ -258,7 +263,7 @@ def run(opts):
                 # ax1 = plt.subplot(111)
                 ax1 = plt.axes([0.1, 0.1, 0.7, 0.8])
                 ax2 = plt.axes([0.82, 0.1, 0.07, 0.8])
-                if not opts.signal:
+                if not (opts.signal or opts.signal_difference):
                     matrix = array([array([matrix.get((i, j), 0) for i in xrange(b1, e1)])
                                     for j in xrange(b2, e2)])
                 try:
@@ -367,7 +372,7 @@ def run(opts):
         printime('Getting and writing matrices')
         out_files.update(write_matrix(
             mreads, opts.reso,
-            load(open(biases)) if biases else None,
+            biases_arr if biases_arr and norm != 'raw' else None,
             outdir, filter_exclude=opts.filter,
             normalizations=opts.normalizations,
             region1=region1, start1=start1, end1=end1,
@@ -477,7 +482,7 @@ def check_options(opts):
         opts.plot = True
         opts.only_plot = True
 
-    if opts.signal:
+    if opts.signal or opts.signal_difference:
         opts.normalizations = ['signal']
         if not opts.plot and not opts.matrix:
             opts.plot = True
@@ -656,6 +661,13 @@ def populate_args(parser):
                         help="""[%(default)s] Retrieve signal matrix (estimated to be significantly
                         different from the background model) from binless normalization.
                         Signal is a fold change.""")
+    
+    outopt.add_argument('--signal_difference', dest='signal_difference', action='store_true',
+                        default=False,
+                        help="""[%(default)s] Retrieve signal difference matrix 
+                        (estimated to be significantly different between two datasets)
+                         from binless normalization.
+                        Signal is a fold change.""")
 
     outopt.add_argument('--signal_threshold', dest='signal_threshold', metavar="NUM",
                         action='store', default=None, type=float, required=False,
@@ -681,7 +693,7 @@ def load_parameters_fromdb(opts):
                 cur.execute("""
                 select distinct Id from JOBs
                 where Type = '%s'
-                """ % ('Normalize' if opts.normalizations != ['raw'] or opts.signal else 'Filter'))
+                """ % ('Normalize' if opts.normalizations != ['raw'] or opts.signal or opts.signal_difference else 'Filter'))
                 jobids = cur.fetchall()
                 parse_jobid = jobids[0][0]
             except IndexError:
@@ -718,16 +730,14 @@ def load_parameters_fromdb(opts):
         # fetch path to parsed BED files
         # try:
         biases = mreads = reso = rdata = None
-        if len(opts.normalizations) > 1 or opts.normalizations[0] != 'raw' or opts.signal:
+        if len(opts.normalizations) > 1 or opts.normalizations[0] != 'raw' or opts.signal or opts.signal_difference:
             try:
                 cur.execute("""
                 select distinct Path from PATHs
                 where paths.jobid = %s and paths.Type = 'BIASES'
                 """ % parse_jobid)
                 biases = cur.fetchall()[0][0]
-                if isinstance(biases, list):
-                    biases = biases[opts.dataset_index]
-                if opts.signal:
+                if opts.signal or opts.signal_difference:
                     cur.execute("""
                     select distinct Path from PATHs
                     where paths.jobid = %s and paths.Type = 'RDATA'

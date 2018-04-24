@@ -173,18 +173,18 @@ def run(opts):
         biases, decay[chrom], rdata_orig = binless(tmp_dir=tmp_binless,
                       interaction_files=infiles_tsv,
                       fast_binless=False, chr=chrom,
-                      beg=beg, end=read_end, resolution=opts.reso,
+                      beg=beg, end=end, resolution=opts.reso,
                       enzyme=opts.renz, read_lens=read_lens,
                       **binless_args)
         decay[chrom] = dict((k, b) for k, b in enumerate(decay[chrom]))
         if len(infiles) == 1:
             biases = dict((k, b) for k, b in enumerate(biases))
-            
         else:
             size_bias = len(biases)/len(infiles)
             arr_biases = []
             for i in xrange(len(infiles)):
-                arr_biases.append(dict((k-i*size_bias, b) for k, b in enumerate(biases) if k > i*size_bias and k < (i+1)*size_bias))
+                arr_biases.append(dict((k-i*size_bias, b) for k, b in enumerate(biases)
+                                       if k >= i*size_bias and k < (i+1)*size_bias))
             biases = arr_biases
         try:
             rdata = path.join(outdir,'binless_%s.RData' % (param_hash))

@@ -77,7 +77,7 @@ def binless(interaction_files, tmp_dir='.', **kwargs):
 
     biases_binless, decay, rdata_orig = binless_normalization(interaction_files=interaction_files,
                                                   tmp_dir=tmp_dir, **kwargs)
-
+    
     return biases_binless, decay, rdata_orig
 
 def oneD(tmp_dir='.', form='tot ~ s(map) + s(cg) + s(res)', **kwargs):
