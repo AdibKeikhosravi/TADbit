@@ -179,11 +179,15 @@ def run(opts):
                                   biases_arr['bin_coords'][0],biases_arr['bin_coords'][1])
                     tmp_binless = path.join(outdir,'_tmp_binless_%s' % (param_hash))
                     mkdir(tmp_binless)
+                    binless_args = {}
+                    if opts.binless_args:
+                        binless_args = dict((k,v) for k,v in (b.split('=') for b in opts.binless_args))
                     signal_csv  = binless_signal_detection(rdata=rdata,
                                     action=('difference' if opts.signal_difference else 'signal'),
                                     tmp_dir=tmp_binless, resolution=opts.reso,
                                     region=region1, start=start1, end=end1,
-                                    dataset_index=opts.dataset_index)
+                                    dataset_index=opts.dataset_index,
+                                    **binless_args)
                     signal = genfromtxt(signal_csv, delimiter=',', dtype=float)
                     nbins = int(floor(sqrt(2*len(signal))))
                     matrix = zeros((nbins, nbins))
@@ -672,6 +676,15 @@ def populate_args(parser):
     outopt.add_argument('--signal_threshold', dest='signal_threshold', metavar="NUM",
                         action='store', default=None, type=float, required=False,
                         help='''show only signal above signal_threshold log2 fold change''')
+    
+    normpt.add_argument('--binless_args', dest='binless_args', nargs='+',
+                        type=str, metavar='STR', default=None,
+                        help=("""[%(default)s] List of arguments and values for binless
+                        normalization. Exposed parameters:
+                        detect_binless_interactions: nperf.
+                        See https://github.com/3DGenomes/binless.  
+                         e.g.:
+                        '--binless_args ncores=8 nperf=70'."""))
 
     outopt.add_argument('--dataset_index', dest='dataset_index', metavar="INT",
                         action='store', default=0, type=int, required=False,

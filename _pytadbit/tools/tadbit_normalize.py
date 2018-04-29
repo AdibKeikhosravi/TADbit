@@ -172,7 +172,7 @@ def run(opts):
         decay = {}
         biases, decay[chrom], rdata_orig = binless(tmp_dir=tmp_binless,
                       interaction_files=infiles_tsv,
-                      fast_binless=False, chr=chrom,
+                      fast_binless=opts.binless_fast, chr=chrom,
                       beg=beg, end=end, resolution=opts.reso,
                       enzyme=opts.renz, read_lens=read_lens,
                       **binless_args)
@@ -516,13 +516,17 @@ def populate_args(parser):
                               ' chr1:150000000-160000000. It can be also just the chromosome.'
                               ' eg.: --binless_locus chr1.'
                               'Required for binless normalization'))
+    
+    normpt.add_argument('--binless_fast', dest='binless_fast'
+                        , action='store_true',
+                        default=False,
+                        help='''use fast approximation of binless normalization.''')
 
     normpt.add_argument('--binless_args', dest='binless_args', nargs='+',
                         type=str, metavar='STR', default=None,
                         help=("""[%(default)s] List of arguments and values for binless
                         normalization. Exposed parameters:
                         normalize_binless: ngibbs, ncores, bg.steps, tol, bf_per_kb, bf_per_decade, bins_per_bf, iter.
-                        detect_binless_interactions: nperf.
                         See https://github.com/3DGenomes/binless.  
                          e.g.:
                         '--binless_args ncores=8 bf_per_kb=20'."""))
