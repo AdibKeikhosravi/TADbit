@@ -175,6 +175,7 @@ def run(opts):
                       fast_binless=opts.binless_fast, chr=chrom,
                       beg=beg, end=end, resolution=opts.reso,
                       enzyme=opts.renz, read_lens=read_lens,
+                      ncores=opts.cpus,
                       **binless_args)
         decay[chrom] = dict((k, b) for k, b in enumerate(decay[chrom]))
         if len(infiles) == 1:

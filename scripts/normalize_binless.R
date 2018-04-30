@@ -69,7 +69,7 @@ get_bin_data = function(csb,resolution)  {
 }
 
 get_autocorrelation = function(cssub, chunks,resolution) {
-  chunks_norm=foreach (c=2:length(chunks),.errorhandling = 'remove',.combine=rbind) %do% {
+  chunks_norm=foreach (c=2:length(chunks),.combine=rbind) %do% {
     cs = cssub
     cs = zoom_csnorm(cs, chunks[c-1], chunks[c])
     matsub = get_bin_data(cs,resolution=resolution)
@@ -100,7 +100,7 @@ if(action == 'normalize') {
   if (exists("bg.steps")) bg.steps=as.integer(bg.steps) else bg.steps=5 #maximum number of steps where only the background model is fitted
   if (exists("iter")) iter=as.integer(iter) else iter=100
   if (exists("tol")) tol=as.numeric(ngibbs) else tol=1e-1 #relative tolerance on computed quantities upon convergence
-  if (exists("nperf")) nperf=as.integer(nperf) else nperf=50
+  if (exists("nperf")) nperf=as.integer(nperf) else nperf=75
   if (exists("min.lambda2")) min.lambda2 = as.numeric(min.lambda2) else min.lambda2=1
   
   base.res=resolution #base resolution for the fused lasso signal detection
@@ -150,15 +150,19 @@ if(action == 'normalize') {
       cs_arr[[c]] = zoom_csnorm(cs, chunks[start_bin], chunks[end_bin])
     }
     library(doParallel)
-    cl<-makeCluster(ncores, type="FORK", outfile="normalize_binless.log")
+    cl<-makeCluster(ncores, outfile=paste0(dirname(rdata),'/',"normalize_binless.log"))
     registerDoParallel(cl)
     #registerDoParallel(cores=ncores)
-    stats=foreach (chunk=chunks_par,csa=cs_arr,.errorhandling = 'remove',.combine=rbind) %dopar% {
+    stats=foreach (chunk=chunks_par,csa=cs_arr,.errorhandling = 'remove',
+                   .packages=c("foreach","data.table","binless"),.combine=rbind) %dopar% {
       get_autocorrelation(csa,chunk,resolution)
     }
     prmatrix(stats)
     all_chunks_norm=foreach (chunk=chunks_par,csa=cs_arr,.combine=rbind) %dopar% {
-      chunks_norm=foreach (c=2:length(chunk),.errorhandling = 'remove',.combine=rbind) %do% {
+      chunks_norm=foreach (c=2:length(chunk),
+                           .errorhandling = 'remove',
+                           .packages=c("foreach","data.table","binless"),
+                           .combine=rbind) %do% {
         csb = csa
         csb = zoom_csnorm(csb, chunk[c-1], chunk[c])
         cat("*** Normalization of submatrix",chunk[c-1],"-",chunk[c],"\n")
