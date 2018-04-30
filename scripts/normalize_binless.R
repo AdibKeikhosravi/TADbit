@@ -133,7 +133,7 @@ if(action == 'normalize') {
       beg_ini=csd@biases[,min(pos)]
       end_ini=csd@biases[,max(pos)]
     }
-    chunks=seq.int(from=beg_ini,to=end_ini, by=1000000)
+    chunks=seq.int(from=beg_ini,to=end_ini, by=2000000)
     chunks[length(chunks)] = end_ini
     npar = floor(ncores/4)
     npar_length = ceiling(length(chunks)/npar)
@@ -148,7 +148,9 @@ if(action == 'normalize') {
       cs_arr[[c]] = zoom_csnorm(cs, chunks[start_bin], chunks[end_bin])
     }
     library(doParallel)
-    registerDoParallel(cores=ncores)
+    cl<-makeCluster(ncores, type="FORK", outfile="normalize_binless.log")
+    registerDoParallel(cl)
+    #registerDoParallel(cores=ncores)
     stats=foreach (chunk=chunks_par,csa=cs_arr,.errorhandling = 'remove',.combine=rbind) %dopar% {
       get_autocorrelation(csa,chunk,resolution)
     }
@@ -160,10 +162,12 @@ if(action == 'normalize') {
         cat("*** Normalization of submatrix",chunk[c-1],"-",chunk[c],"\n")
         csb <- normalize_binless(csb, ngibbs = ngibbs, ncores = 4, base.res = base.res, bg.steps = bg.steps, tol = tol,
                                  bf_per_kb = bf_per_kb, bf_per_decade = bf_per_decade, bins_per_bf = bins_per_bf, iter=iter)  
+        save(csb,file=paste0(dirname(dirname(rdata)),'/',chunk[c-1],"-",chunk[c],'.RData'))
         c(chunks[c-1],chunks[c],csb@par$lambda2,csb@par$alpha[1])
       }
     }
-    stopImplicitCluster()
+    #stopImplicitCluster()
+    stopCluster(cl)
     prmatrix(all_chunks_norm)
     #idx_corr = which.min(abs(corr))
     #cs = csall
