@@ -100,6 +100,8 @@ if(action == 'normalize') {
   if (exists("bg.steps")) bg.steps=as.integer(bg.steps) else bg.steps=5 #maximum number of steps where only the background model is fitted
   if (exists("iter")) iter=as.integer(iter) else iter=100
   if (exists("tol")) tol=as.numeric(ngibbs) else tol=1e-1 #relative tolerance on computed quantities upon convergence
+  if (exists("nperf")) nperf=as.integer(nperf) else nperf=50
+  if (exists("min.lambda2")) min.lambda2 = as.numeric(min.lambda2) else min.lambda2=1
   
   base.res=resolution #base resolution for the fused lasso signal detection
   name="TADbit norm"
@@ -133,7 +135,7 @@ if(action == 'normalize') {
       beg_ini=csd@biases[,min(pos)]
       end_ini=csd@biases[,max(pos)]
     }
-    chunks=seq.int(from=beg_ini,to=end_ini, by=2000000)
+    chunks=seq.int(from=beg_ini,to=end_ini, by=1000000)
     chunks[length(chunks)] = end_ini
     npar = floor(ncores/4)
     npar_length = ceiling(length(chunks)/npar)
@@ -161,9 +163,12 @@ if(action == 'normalize') {
         csb = zoom_csnorm(csb, chunk[c-1], chunk[c])
         cat("*** Normalization of submatrix",chunk[c-1],"-",chunk[c],"\n")
         csb <- normalize_binless(csb, ngibbs = ngibbs, ncores = 4, base.res = base.res, bg.steps = bg.steps, tol = tol,
-                                 bf_per_kb = bf_per_kb, bf_per_decade = bf_per_decade, bins_per_bf = bins_per_bf, iter=iter)  
+                                 bf_per_kb = bf_per_kb, bf_per_decade = bf_per_decade, bins_per_bf = bins_per_bf, iter=iter,
+                                 min.lambda2 = min.lambda2)
+        csb=bin_all_datasets(csb, ncores = 4)
+        csb=detect_binless_interactions(csb, ncores = 4, nperf = nperf)
         save(csb,file=paste0(dirname(dirname(rdata)),'/',chunk[c-1],"-",chunk[c],'.RData'))
-        c(chunks[c-1],chunks[c],csb@par$lambda2,csb@par$alpha[1])
+        c(chunks[c-1],chunks[c],csb@groups[[1]]@interactions[[1]]@par$lambda2,csb@par$alpha[1])
       }
     }
     #stopImplicitCluster()
@@ -192,7 +197,8 @@ if(action == 'normalize') {
     mat_distance = exp(mat$distance)
   } else {
     cs <- normalize_binless(cs, ngibbs = ngibbs, ncores = ncores, base.res = base.res, bg.steps = bg.steps, tol = tol,
-                            bf_per_kb = bf_per_kb, bf_per_decade = bf_per_decade, bins_per_bf = bins_per_bf, iter=iter)
+                            bf_per_kb = bf_per_kb, bf_per_decade = bf_per_decade, bins_per_bf = bins_per_bf, iter=iter,
+                            min.lambda2 = min.lambda2)
     save(cs,file=paste(rdata))
     cs=bin_all_datasets(cs, ncores=ncores)
     mat=get_binned_matrices(cs)

@@ -526,7 +526,9 @@ def populate_args(parser):
                         type=str, metavar='STR', default=None,
                         help=("""[%(default)s] List of arguments and values for binless
                         normalization. Exposed parameters:
-                        normalize_binless: ngibbs, ncores, bg.steps, tol, bf_per_kb, bf_per_decade, bins_per_bf, iter.
+                        normalize_binless: ngibbs, ncores, bg.steps, tol, bf_per_kb, 
+                            bf_per_decade, bins_per_bf, iter, min.lambda2.
+                        detect_binless_interactions: nperf.
                         See https://github.com/3DGenomes/binless.  
                          e.g.:
                         '--binless_args ncores=8 bf_per_kb=20'."""))
