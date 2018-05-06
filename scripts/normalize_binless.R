@@ -44,6 +44,37 @@ match_size = function(mat, b_nbins, nbins, dsets) {
   return(mat)
 }
 
+makeSymm <- function(m) {
+  m[lower.tri(m)] <- t(m)[lower.tri(m)]
+  return(m)
+}
+
+di_index = function(hicmat,nw,n) {
+  A = matrix(NA,n,n)
+  A[lower.tri(A,diag=TRUE)] = hicmat
+  A = t(A)
+  A = makeSymm(A)
+  #signal1 = rep(0,n)
+  signal1 = foreach (i=(1+nw):(n-nw),.combine=c) %do% {
+    vect_left = foreach (k=(i-nw):(i-1),.combine=c) %do% {
+      if(k < 1) return(NA)
+      if(A[i,k] > 0) return(log(A[i,k]))
+      else return(0);  
+    }
+    vect_left = vect_left[!is.na(vect_left)]
+    vect_right = foreach (k=(i+1):(i+nw),.combine=c) %do% {
+      if(k > n) return(NA)
+      if(A[i,k] > 0) return(log(A[i,k]))
+      else return(0);  
+    }
+    vect_right = vect_right[!is.na(vect_right)]
+    
+    if(sum(vect_left) != 0 && sum(vect_right) != 0) return(t.test(vect_right,vect_left, paired = TRUE)$statistic)
+    else return(0)
+  }
+  return(sd(signal1))
+}
+
 get_bin_data = function(csb,resolution)  {
   counts = data.table()
   bin_borders = csb@biases[, seq(min(pos) - 1, max(pos) + 
@@ -73,7 +104,9 @@ get_autocorrelation = function(cssub, chunks,resolution) {
     cs = cssub
     cs = zoom_csnorm(cs, chunks[c-1], chunks[c])
     matsub = get_bin_data(cs,resolution=resolution)
-    c(chunks[c-1],chunks[c],cor(matsub$observed[-length(matsub$observed)],matsub$observed[-1]), sd(matsub$observed))
+    n=floor((length(matsub$observed)*2)**0.5) 
+    c(chunks[c-1],chunks[c], sd(matsub$observed),di_index(matsub$observed,floor(1000000/resolution/10),n)
+    )
   }
 }
 
@@ -156,23 +189,43 @@ if(action == 'normalize') {
     stats=foreach (chunk=chunks_par,csa=cs_arr,.errorhandling = 'remove',
                    .packages=c("foreach","data.table","binless"),.combine=rbind) %dopar% {
       get_autocorrelation(csa,chunk,resolution)
+                   }
+    colnames(stats) = c('start','end','std','std.directionality')
+    rownames(stats) = NULL
+    num_clusters = min(5,max(length(chunks),3)-2)
+    fit = kmeans(stats[,c('std','std.directionality')], num_clusters)
+    stats = data.frame(stats, fit$cluster)
+    colnames(stats) = c('start','end','std','std.directionality','fit.cluster')
+    stats[,'id'] = rownames(stats)
+    stats[,'dist'] = NA
+    for (i in 1:num_clusters){
+      stats[stats$fit.cluster==i,]$dist = abs(stats[stats$fit.cluster==i,]$std - fit$centers[i,1]) 
+              + abs(stats[stats$fit.cluster==i,]$std.directionality - fit$centers[i,2]) 
     }
     prmatrix(stats)
-    all_chunks_norm=foreach (chunk=chunks_par,csa=cs_arr,.combine=rbind) %dopar% {
-      chunks_norm=foreach (c=2:length(chunk),
+    stats = data.table(stats)
+    reps_index = as.integer(stats[,.SD[which.min(dist)],by=fit.cluster][,id])
+    npar_length = ceiling(num_clusters/npar)
+    chunks_par = split(reps_index, ceiling(seq_along(reps_index)/npar_length))
+    cs_arr = list()
+    for(c in reps_index) {
+      cs = csall
+      cs_arr[[c]] = zoom_csnorm(cs, as.integer(stats[c,'start']), as.integer(stats[c,'end']))
+    }
+    all_chunks_norm=foreach (chunk=chunks_par,.combine=rbind) %dopar% {
+      chunks_norm=foreach (c=chunk,
                            .errorhandling = 'remove',
                            .packages=c("foreach","data.table","binless"),
                            .combine=rbind) %do% {
-        csb = csa
-        csb = zoom_csnorm(csb, chunk[c-1], chunk[c])
-        cat("*** Normalization of submatrix",chunk[c-1],"-",chunk[c],"\n")
+        csb = cs_arr[[c]]
+        cat("*** Normalization of submatrix",as.integer(stats[c,'start']),"-",as.integer(stats[c,'end']),"\n")
         csb <- normalize_binless(csb, ngibbs = ngibbs, ncores = 4, base.res = base.res, bg.steps = bg.steps, tol = tol,
                                  bf_per_kb = bf_per_kb, bf_per_decade = bf_per_decade, bins_per_bf = bins_per_bf, iter=iter,
                                  min.lambda2 = min.lambda2)
         csb=bin_all_datasets(csb, ncores = 4)
         csb=detect_binless_interactions(csb, ncores = 4, nperf = nperf)
-        save(csb,file=paste0(dirname(dirname(rdata)),'/',chunk[c-1],"-",chunk[c],'.RData'))
-        c(chunks[c-1],chunks[c],csb@groups[[1]]@interactions[[1]]@par$lambda2,csb@par$alpha[1])
+        #save(csb,file=paste0(format(as.integer(stats[c,'start']),scientific = FALSE),"-",format(as.integer(stats[c,'end']),scientific = FALSE),'.RData'))
+        c(as.integer(stats[c,'start']),as.integer(stats[c,'end']),csb@groups[[1]]@interactions[[1]]@par$lambda2,csb@par$alpha[1])
       }
     }
     #stopImplicitCluster()
