@@ -225,7 +225,10 @@ if(action == 'normalize') {
         csb=bin_all_datasets(csb, ncores = 4)
         csb=detect_binless_interactions(csb, ncores = 4, nperf = nperf)
         #save(csb,file=paste0(format(as.integer(stats[c,'start']),scientific = FALSE),"-",format(as.integer(stats[c,'end']),scientific = FALSE),'.RData'))
-        c(as.integer(stats[c,'start']),as.integer(stats[c,'end']),csb@groups[[1]]@interactions[[1]]@par$lambda2,csb@par$alpha[1])
+        c(as.integer(stats[c,'start']),as.integer(stats[c,'end']),
+               csb@par$alpha[1],
+               csb@groups[[1]]@interactions[[1]]@par$lambda2,
+               csb@groups[[1]]@interactions[[1]]@par$lambda1)
       }
     }
     #stopImplicitCluster()
@@ -239,16 +242,18 @@ if(action == 'normalize') {
     #lam2 = cs@par$lambda2
     #alpha = cs@par$alpha[1]
     #cs = csall
-    lam2=mean(all_chunks_norm[,3])
+    lam1=mean(all_chunks_norm[,5])
+    cat("*** Using average lambda1=",lam1,"\n")
+    lam2=mean(all_chunks_norm[,4])
     cat("*** Using average lambda2=",lam2,"\n")
-    alpha=mean(all_chunks_norm[,4])
+    alpha=mean(all_chunks_norm[,3])
     cat("*** Using average alpha=",alpha,"\n")
     mat=binless:::bin_data(cs,resolution=resolution)
     if (exists("nouter")) nouter=as.integer(nouter) else nouter=25
     if (exists("tol_val")) tol_val=as.integer(tol_val) else tol_val=2e-1
     if (exists("bg_steps")) bg_steps=as.integer(bg_steps) else bg_steps=5
     if (exists("free_decay")) free_decay=as.integer(free_decay) else free_decay=10000
-    out=binless:::fast_binless(mat, mat[,nlevels(bin1)], lam2, alpha, nouter, tol_val, bg_steps, free_decay)
+    out=binless:::fast_binless(mat, mat[,nlevels(bin1)], alpha, lam2, lam1, nouter, tol_val, bg_steps, free_decay)
     mat=as.data.table(out$mat)
     save(out,file=paste(rdata))
     mat_distance = exp(mat$distance)
