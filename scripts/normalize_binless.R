@@ -231,7 +231,6 @@ if(action == 'normalize') {
                csb@groups[[1]]@interactions[[1]]@par$lambda1)
       }
     }
-    #stopImplicitCluster()
     stopCluster(cl)
     prmatrix(all_chunks_norm)
     #idx_corr = which.min(abs(corr))
@@ -250,7 +249,7 @@ if(action == 'normalize') {
     cat("*** Using average alpha=",alpha,"\n")
     mat=binless:::bin_data(cs,resolution=resolution)
     if (exists("nouter")) nouter=as.integer(nouter) else nouter=25
-    if (exists("tol_val")) tol_val=as.integer(tol_val) else tol_val=2e-1
+    if (exists("tol_val")) tol_val=as.integer(tol_val) else tol_val=1e-1
     if (exists("bg_steps")) bg_steps=as.integer(bg_steps) else bg_steps=5
     if (exists("free_decay")) free_decay=as.integer(free_decay) else free_decay=10000
     out=binless:::fast_binless(mat, mat[,nlevels(bin1)], alpha, lam2, lam1, nouter, tol_val, bg_steps, free_decay)
@@ -277,7 +276,7 @@ if(action == 'normalize') {
   write.table(mat_distance[1:nbins],file = output_distance,row.names = FALSE,col.names = FALSE,sep = ',')
   write.table(mat_biasmat,file = output_bias,row.names = FALSE,col.names = FALSE,sep = ',')
 } else if(action == 'signal') {
-  if (exists("nperf")) nperf=as.integer(nperf) else nperf=50
+  if (exists("nperf")) nperf=as.integer(nperf) else nperf=75
   if (exists("dataset_index")) dataset_index=as.integer(dataset_index) else dataset_index=0
   load(paste(rdata))
   if (exists("cs")) {
