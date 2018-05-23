@@ -194,7 +194,6 @@ def run(opts):
         if opts.binless_args:
             binless_args = dict((k,v) for k,v in (b.split('=') for b in opts.binless_args))
         decay = {}
-        exit()
         biases, decay[chrom], rdata_orig = binless(tmp_dir=tmp_binless,
                       interaction_files=infiles_tsv,
                       fast_binless=opts.binless_fast, chr=chrom,
