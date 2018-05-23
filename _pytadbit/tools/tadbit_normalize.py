@@ -15,7 +15,7 @@ from collections                          import OrderedDict
 from cPickle                              import dump, load
 from traceback                            import print_exc
 from multiprocessing                      import cpu_count
-from re                                   import finditer
+from re                                   import finditer, compile, search
 import multiprocessing  as mu
 import sqlite3 as lite
 import time
@@ -175,7 +175,7 @@ def run(opts):
             lowindex = max(0,lowindex-1)
             highindex = min(range(len(rsites)), key=lambda i: abs(rsites[i]-end-1))
             highindex = min(len(rsites),highindex+1)
-            rsites = rsites[lowindex:highindex]
+            rsites = rsites[lowindex:highindex+1]
 
         read_lens = []
         tmp_binless = path.join(outdir,'tmp_binless_%s' % (param_hash))
@@ -183,7 +183,8 @@ def run(opts):
         infiles_tsv = []
         for i, infile in enumerate(infiles):
             infile_tsv, read_len, read_end, bin_coords = extract_tsv_from_bam(infile,
-                                rsites=rsites, filter_exclude=filter_exclude,
+                                rsites=rsites,
+                                filter_exclude=filter_exclude,
                                 resolution=opts.reso, outdir=tmp_binless,
                                 extra_out=str(i), region=chrom,
                                 start=beg, end=end)
@@ -777,7 +778,33 @@ def read_bam_frag_filter(inbam, filter_exclude, all_bins, sections,
         print e
         print(exc_type, fname, exc_tb.tb_lineno)
 
-def extract_tsv_from_bam(inbam, rsites, filter_exclude, resolution, region, start, end, extra_out='', outdir='.'):
+def bisection(array,value):
+    '''Given an ``array`` , and given a ``value`` , returns an index j such that ``value`` is between array[j]
+    and array[j+1]. ``array`` must be monotonic increasing. j=-1 or j=len(array) is returned
+    to indicate that ``value`` is out of range below and above respectively.'''
+    n = len(array)
+    if (value < array[0]):
+        return -1
+    elif (value > array[n-1]):
+        return n
+    jl = 0# Initialize lower
+    ju = n-1# and upper limits.
+    while (ju-jl > 1):# If we are not yet done,
+        jm=(ju+jl) >> 1# compute a midpoint with a bitshift
+        if (value >= array[jm]):
+            jl=jm# and replace either the lower limit
+        else:
+            ju=jm# or the upper limit, as appropriate.
+        # Repeat until the test condition is satisfied.
+    if (value == array[0]):# edge cases at bottom
+        return 0
+    elif (value == array[n-1]):# and top
+        return n-1
+    else:
+        return jl
+    
+def extract_tsv_from_bam(inbam, rsites, filter_exclude, resolution, region,
+                         start, end, extra_out='', outdir='.'):
     bamfile = AlignmentFile(inbam, 'rb')
     refs = bamfile.references
     sections = OrderedDict(zip(bamfile.references,
@@ -789,6 +816,7 @@ def extract_tsv_from_bam(inbam, rsites, filter_exclude, resolution, region, star
         total += sections[crm]
     bin_coords = (section_pos[region][0] + start / resolution, 
                   section_pos[region][0] + end / resolution)
+    
     try:
         try:
             fnam = path.join(outdir,
@@ -806,7 +834,7 @@ def extract_tsv_from_bam(inbam, rsites, filter_exclude, resolution, region, star
                 continue
             crm1 = r.reference_name
             pos1 = r.reference_start + 1
-            crm2 = refs[r.mrnm]
+            crm2 = refs[r.mrnm] # should be equal to crm1
             pos2 = r.mpos + 1
             if crm1 == region and crm2 == region and start <= pos1 < end and start <= pos2 < end:
                 le1, le2 = map(int, (r.cigar[0][1], r.template_length))
@@ -819,10 +847,15 @@ def extract_tsv_from_bam(inbam, rsites, filter_exclude, resolution, region, star
                 else:
                     read_length[le2] = 1
                 last_pos = max(pos1,pos2)
-                e1 = max([rsite for rsite in rsites if rsite <= (pos1-1)])+1
-                e2 = min([rsite for rsite in rsites if rsite > (pos1-1)])+1
-                e3 = max([rsite for rsite in rsites if rsite <= (pos2-1)])+1
-                e4 = min([rsite for rsite in rsites if rsite > (pos2-1)])+1
+
+                e1 = bisection(rsites,pos1-1)
+                e2 = e1 + 1
+                e1 = rsites[e1] + 1
+                e2 = rsites[e2] + 1
+                e3 = bisection(rsites,pos2-1)
+                e4 = e3 + 1
+                e3 = rsites[e3] + 1
+                e4 = rsites[e4] + 1
                 line = ('{0}\t{1}\t{2}\t{3}\t{4}\t{5}\t{6}\t{7}\t'
                         '{8}\t{9}\t{10}\t{11}\t{12}\n').format(
                     r.qname,
