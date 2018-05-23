@@ -352,7 +352,6 @@ def run(opts):
                     gradient = linspace(maxdata, mindata, max((len(matrix),
                                                            len(matrix[0]))))
                     gradient = dstack((gradient, gradient))[0]
-                try:
                     h  = ax2.hist(data, color='darkgrey', linewidth=2,
                                   orientation='horizontal',
                                   bins=50, histtype='step', density=True)

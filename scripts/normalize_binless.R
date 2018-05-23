@@ -249,7 +249,7 @@ if(action == 'normalize') {
     cat("*** Using average alpha=",alpha,"\n")
     mat=binless:::bin_data(cs,resolution=resolution)
     if (exists("nouter")) nouter=as.integer(nouter) else nouter=25
-    if (exists("tol_val")) tol_val=as.integer(tol_val) else tol_val=1e-1
+    if (exists("tol_val")) tol_val=as.integer(tol_val) else tol_val=0.2
     if (exists("bg_steps")) bg_steps=as.integer(bg_steps) else bg_steps=5
     if (exists("free_decay")) free_decay=as.integer(free_decay) else free_decay=10000
     out=binless:::fast_binless(mat, mat[,nlevels(bin1)], alpha, lam2, lam1, nouter, tol_val, bg_steps, free_decay)

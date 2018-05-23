@@ -15,6 +15,7 @@ from collections                          import OrderedDict
 from cPickle                              import dump, load
 from traceback                            import print_exc
 from multiprocessing                      import cpu_count
+from re                                   import finditer
 import multiprocessing  as mu
 import sqlite3 as lite
 import time
@@ -141,6 +142,8 @@ def run(opts):
         if len(infiles) == 0:
             raise Exception('ERROR: missing intersection files for binless normalization.\n' +
             'Use binless_jobids.')
+        if not opts.fasta:
+            raise Exception('ERROR: missing path to FASTA for binless normalization')
         if not opts.renz:
             raise Exception('ERROR: missing restriction enzyme name for binless normalization')
         if not opts.binless_locus:
@@ -155,14 +158,34 @@ def run(opts):
             chrom = opts.binless_locus
             beg = 1
             end = float("inf")
+        
+        # get genome sequence ~1 min
+        printime('  - parsing FASTA')
+        genome = parse_fasta(opts.fasta, verbose=False)
+
+        fas = set(genome.keys())
+        if chrom not in fas:
+            raise Exception("ERROR: chromosomes in FASTA different the ones in BAM")
+
+        printime('  - Computing position of RE sites')
+        re_site = RESTRICTION_ENZYMES[opts.renz].replace('|', '')
+        rsites = [m.start() for m in finditer(re_site,genome[chrom])]
+        if end != float("inf"):
+            lowindex = min(range(len(rsites)), key=lambda i: abs(rsites[i]-beg-1))
+            lowindex = max(0,lowindex-1)
+            highindex = min(range(len(rsites)), key=lambda i: abs(rsites[i]-end-1))
+            highindex = min(len(rsites),highindex+1)
+            rsites = rsites[lowindex:highindex]
+
         read_lens = []
         tmp_binless = path.join(outdir,'tmp_binless_%s' % (param_hash))
         mkdir(tmp_binless)
         infiles_tsv = []
         for i, infile in enumerate(infiles):
             infile_tsv, read_len, read_end, bin_coords = extract_tsv_from_bam(infile,
-                                filter_exclude=filter_exclude, resolution=opts.reso,
-                                outdir=tmp_binless, extra_out=str(i), region=chrom,
+                                rsites=rsites, filter_exclude=filter_exclude,
+                                resolution=opts.reso, outdir=tmp_binless,
+                                extra_out=str(i), region=chrom,
                                 start=beg, end=end)
             infiles_tsv.append(infile_tsv)
             read_lens.append(read_len)
@@ -170,6 +193,7 @@ def run(opts):
         if opts.binless_args:
             binless_args = dict((k,v) for k,v in (b.split('=') for b in opts.binless_args))
         decay = {}
+        exit()
         biases, decay[chrom], rdata_orig = binless(tmp_dir=tmp_binless,
                       interaction_files=infiles_tsv,
                       fast_binless=opts.binless_fast, chr=chrom,
@@ -753,7 +777,7 @@ def read_bam_frag_filter(inbam, filter_exclude, all_bins, sections,
         print e
         print(exc_type, fname, exc_tb.tb_lineno)
 
-def extract_tsv_from_bam(inbam, filter_exclude, resolution, region, start, end, extra_out='', outdir='.'):
+def extract_tsv_from_bam(inbam, rsites, filter_exclude, resolution, region, start, end, extra_out='', outdir='.'):
     bamfile = AlignmentFile(inbam, 'rb')
     refs = bamfile.references
     sections = OrderedDict(zip(bamfile.references,
@@ -778,9 +802,6 @@ def extract_tsv_from_bam(inbam, filter_exclude, resolution, region, start, end, 
         for r in bamfile.fetch(region=region,
                                start=start - (1 if start else 0), end=(end if end != float('inf') else None),  # coords starts at 0
                                multiple_iterators=True):
-            if len(r.tags) < 7:
-                raise Exception("ERROR: bam file does not contain all the needed information.\n"
-                        "Use tadbit filter with --binless_filter option")
             if r.flag & filter_exclude:
                 continue
             crm1 = r.reference_name
@@ -798,6 +819,10 @@ def extract_tsv_from_bam(inbam, filter_exclude, resolution, region, start, end, 
                 else:
                     read_length[le2] = 1
                 last_pos = max(pos1,pos2)
+                e1 = max([rsite for rsite in rsites if rsite <= (pos1-1)])+1
+                e2 = min([rsite for rsite in rsites if rsite > (pos1-1)])+1
+                e3 = max([rsite for rsite in rsites if rsite <= (pos2-1)])+1
+                e4 = min([rsite for rsite in rsites if rsite > (pos2-1)])+1
                 line = ('{0}\t{1}\t{2}\t{3}\t{4}\t{5}\t{6}\t{7}\t'
                         '{8}\t{9}\t{10}\t{11}\t{12}\n').format(
                     r.qname,
@@ -805,14 +830,14 @@ def extract_tsv_from_bam(inbam, filter_exclude, resolution, region, start, end, 
                     pos1,
                     r.tags[1][1],
                     le1,
-                    r.tags[3][1],
-                    r.tags[4][1],
+                    e1,
+                    e2,
                     crm2,
                     pos2,
                     r.tags[2][1],
                     le2,
-                    r.tags[5][1],
-                    r.tags[6][1])
+                    e3,
+                    e4)
                 out.write(line)
         out.close()
     except Exception, e:
