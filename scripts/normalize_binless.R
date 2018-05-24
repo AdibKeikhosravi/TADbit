@@ -8,42 +8,6 @@ if (length(args)<1) {
 
 source(args[1])
 
-match_size = function(mat, b_nbins, nbins, dsets) {
-  if(b_nbins > nbins) {
-    seq_bins = c()
-    p = 1
-    for (i in 1:dsets) {
-      for (a in 1:b_nbins) {
-        for (b in a:b_nbins) {
-          if(a<=nbins && b<=nbins) {
-            seq_bins = c(seq_bins,p)
-          }
-          p=p+1
-        }	
-      }
-    }
-    mat = mat[seq_bins]
-  }
-  if(b_nbins < nbins) {
-    ext_mat = c()
-    p = 1
-    for (i in 1:dsets) {
-      for (a in 1:nbins) {
-        for (b in a:nbins) {
-          if(a>b_nbins || b>b_nbins) {
-            ext_mat = c (ext_mat,0.)
-          } else {
-            ext_mat = c (ext_mat,mat[p])
-          }
-          p=p+1
-        }	
-      }
-    }
-    mat = ext_mat
-  }
-  return(mat)
-}
-
 makeSymm <- function(m) {
   m[lower.tri(m)] <- t(m)[lower.tri(m)]
   return(m)
@@ -241,11 +205,11 @@ if(action == 'normalize') {
     #lam2 = cs@par$lambda2
     #alpha = cs@par$alpha[1]
     #cs = csall
-    lam1=mean(all_chunks_norm[,5])
+    lam1=min(all_chunks_norm[,5])
     cat("*** Using average lambda1=",lam1,"\n")
-    lam2=mean(all_chunks_norm[,4])
+    lam2=min(all_chunks_norm[,4])
     cat("*** Using average lambda2=",lam2,"\n")
-    alpha=mean(all_chunks_norm[,3])
+    alpha=min(all_chunks_norm[,3])
     cat("*** Using average alpha=",alpha,"\n")
     mat=binless:::bin_data(cs,resolution=resolution)
     if (exists("nouter")) nouter=as.integer(nouter) else nouter=25
@@ -271,7 +235,6 @@ if(action == 'normalize') {
   length_dset = length(mat_biasmat)/length(infiles)
   nbins = (as.integer(end)-as.integer(beg))/resolution
   b_nbins = as.integer(floor(sqrt(2*length_dset)))
-  mat_biasmat=match_size(mat_biasmat, b_nbins, nbins, length(infiles)) 
   write.table(mat_decaymat[1:nbins],file = output_decay,row.names = FALSE,col.names = FALSE,sep = ',')
   write.table(mat_distance[1:nbins],file = output_distance,row.names = FALSE,col.names = FALSE,sep = ',')
   write.table(mat_biasmat,file = output_bias,row.names = FALSE,col.names = FALSE,sep = ',')
@@ -297,7 +260,6 @@ if(action == 'normalize') {
   }
   nbins = (as.integer(end)-as.integer(start))/as.integer(resolution)
   b_nbins = as.integer(floor(sqrt(2*length_dset)))
-  mat_signal=match_size(mat_signal, b_nbins, nbins, dsets) 
   if(dsets > 1) {
     mat_signal = mat_signal[(1+length_dset*dataset_index):(length_dset*(dataset_index+1))]
   }

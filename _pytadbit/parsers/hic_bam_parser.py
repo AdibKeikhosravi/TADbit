@@ -597,10 +597,13 @@ def get_biases_region(biases, bin_coords):
         end_bin2 -= bin_coords[0]
     if biases_type  == 'matrix':
         bias = biases.get('biases')
+        nbins = end_bin1-start_bin1
         N = int(floor(sqrt(2*len(bias))))
-        bias1 = zeros((N, N))
-        bias1[triu_indices(N, 0)] = array(bias.values())
-        bias1 = tril(bias1.T,-1) + bias1
+        bias1 = zeros((nbins, nbins))
+        biasmat = zeros((N, N))
+        biasmat[triu_indices(N, 0)] = array(bias.values())
+        biasmat = tril(biasmat.T,-1) + biasmat
+        bias1[:N,:N] = biasmat
         bias2 = None
     else:
         bias1  = dict((k - start_bin1, v)
