@@ -145,18 +145,23 @@ optpar = load(params_file)
 coords = load(params_file)
 params_file.close()
 
-models = generate_3d_models(zscores, opts.reso, %s,
-                                    values=values, n_models=%s,
-                                    n_keep=%s,
-                                    n_cpus=opts.cpus_per_job, keep_all=True,
-                                    start=int(opts.rand)+%s, container=None,
-                                    config=optpar, coords=coords, experiment=exp,
-                                    zeros=zeros)
-
-models.save_models(path.join("%s",'results.models'),minimal=%s)
-        ''' % (paramsfile, nloci, nmodels_per_job, nmodels_per_job,
+try:
+    models = generate_3d_models(zscores, opts.reso, %s,
+                                        values=values, n_models=%s,
+                                        n_keep=%s,
+                                        n_cpus=opts.cpus_per_job, keep_all=True,
+                                        start=int(opts.rand)+%s, container=None,
+                                        config=optpar, coords=coords, experiment=exp,
+                                        zeros=zeros)
+    
+    models.save_models(path.join("%s",'results.models'),minimal=%s)
+except Exception as e: 
+    print(e)
+    open(path.join("%s",'failed.flag'), 'a').close()
+    ''' % (paramsfile, nloci, nmodels_per_job, nmodels_per_job,
                n_job*opts.nmodels_per_job, job_dir,
-               '()' if n_job==0 else '["restraints", "zscores", "original_data"]'))
+               '()' if n_job==0 else '["restraints", "zscores", "original_data"]',
+               job_dir))
 
         tmp.close()
 
@@ -165,13 +170,14 @@ def run_distributed_job(job_dir, script_cmd , script_args):
     scriptname = path.join(job_dir,'_tmp_optim.py')
     logname = path.join(job_dir,'_tmp_log.log')
     with open(logname, 'w') as f:
-        subprocess.Popen([script_cmd, script_args, scriptname], stdout = f)
+        subprocess.Popen([script_cmd, script_args, scriptname], stdout = f, stderr = f)
     results_file = path.join(job_dir,'results.models')
-    while not path.exists(results_file):
+    failed_flag = path.join(job_dir,'failed.flag')
+    while not (path.exists(results_file) or path.exists(failed_flag)):
         time.sleep(10)
 
 def run_distributed_jobs(opts, m, u, l, s, outdir, job_file_handler = None,
-                         exp = None, script_cmd = 'python', 
+                         exp = None, script_cmd = 'python',
                          script_args = '', verbose = True):
 
     muls = tuple(map(my_round, (m, u, l, s)))
@@ -201,11 +207,18 @@ def run_distributed_jobs(opts, m, u, l, s, outdir, job_file_handler = None,
         try:
             job_dir = path.join(dirname,'_tmp_results_%s' % n_job)
             results_file = path.join(job_dir,'results.models')
-            results = load_structuralmodels(results_file)
-            if models:
-                models._extend_models(results, nbest=len(models)+len(results))
-            else:
-                models = results
+            if path.isfile(results_file):
+                results = load_structuralmodels(results_file)
+                if models:
+                    models._extend_models(results, nbest=len(models)+len(results))
+                else:
+                    models = results
+            failed_flag = path.join(job_dir,'failed.flag')
+            logname = path.join(job_dir,'_tmp_log.log')
+            if path.isfile(failed_flag):
+                f = open(logname, 'r')
+                logging.error(f.read())
+                f.close()
             system('rm -rf %s' % (job_dir))
         except TimeoutError:
             logging.info("Model took more than %s seconds to complete ... canceling" % str(opts.timeout_job))
@@ -270,15 +283,16 @@ def optimization_distributed(exp, opts, outdir, job_file_handler = None,
 
     # get the best combination
     best = ({'corr': None}, [None, None, None, None, None])
-    
+    results = {}
     for m, u, l, s in product(opts.maxdist, opts.upfreq, opts.lowfreq, opts.scale):
-        results, _ = run_distributed_jobs(opts, m, u, l, s, outdir, job_file_handler, 
+        muls_results, _ = run_distributed_jobs(opts, m, u, l, s, outdir, job_file_handler, 
                             script_cmd = script_cmd, script_args = script_args, verbose=verbose)
-        if not job_file_handler:
-            for m, u, l, d, s in results:
-                if results[(m, u, l, d, s)]['corr'] > best[0]['corr']:
-                    best = results[(m, u, l, d, s)], [u, l, m, s, d]
-    if job_file_handler:
+        results.update(muls_results)
+    if not job_file_handler:
+        for m, u, l, d, s in results:
+            if results[(m, u, l, d, s)]['corr'] > best[0]['corr']:
+                best = results[(m, u, l, d, s)], [u, l, m, s, d]
+    else:
         return None, None
     if verbose:
         logging.info( '\nBest combination:')
@@ -399,7 +413,7 @@ def run(opts):
                                     script_cmd = opts.script_cmd, script_args = opts.script_args)
             if not opts.job_list and "optimization plot" in opts.analyze_list:
                 if optpar:
-                    optimizer = IMPoptimizer(exp, opts.beg, opts.end)
+                    optimizer = IMPoptimizer(exp, opts.beg + 1 - opts.offset, opts.end + 1 - opts.offset)
                     optimizer.scale_range    = [i for i in opts.scale]
                     optimizer.kbending_range = [0.0]
                     optimizer.maxdist_range  = [i for i in opts.maxdist]
@@ -500,7 +514,7 @@ def run(opts):
             logging.info("\t\tWARNING: plot for clusters could not be made...")
     
         if not opts.not_write_json:
-            models.write_json(path.join(outdir, batch_job_hash + '.json'), title = name)
+            models.write_json(path.join(outdir, batch_job_hash + '.json'), title = opts.project+' '+name if opts.project else name)
     
         if not (opts.not_write_xyz and opts.not_write_cmm):
             # Save the clustered models into directories for easy visualization with
@@ -881,6 +895,9 @@ def populate_args(parser):
                         help='cell type name')
     descro.add_argument('--exp_type', dest='exp_type', metavar="STRING",
                         help='experiment type name (i.e.: Hi-C)')
+    descro.add_argument('--project', dest='project', metavar="STRING",
+                        default=None,
+                        help='''project name''')
 
     reopts.add_argument('--crm', dest='crm', metavar="NAME",default=None,
                         help='chromosome name')
@@ -1195,24 +1212,31 @@ def load_hic_data(opts):
         hic = read_matrix(opts.matrix, hic=False,
                           resolution=opts.reso)
         if opts.crm: # just to avoid loading the full chromosome to model a small region
+            if opts.crm not in hic.chromosomes:
+                raise Exception('ERROR: chromosome %s not in input matrix(%s).' % (opts.crm,
+                                                    ','.join([h for h in hic.chromosomes])))
             hic = hic.get_matrix(focus=(opts.beg+1,opts.end+1))
             opts.offset = opts.beg
-        crm.add_experiment('test', enzyme=opts.enzyme,
+        else:
+            if len(hic.chromosomes) == 1: # we assume full chromosome
+                logging.info('WARNING: assuming full chromosome %s.' % next(iter(hic.chromosomes)))
+                opts.crm = next(iter(hic.chromosomes))
+                opts.beg = 1
+                opts.end = hic.chromosomes[opts.crm]
+        crm.add_experiment('test',
             cell_type=opts.cell,
-            identifier=opts.identifier, # general descriptive fields
             project=opts.project, # user descriptions
             norm_data=[hic], resolution=opts.reso)
     except Exception, e:
         logging.info( str(e))
         #warn('WARNING: failed to load data as TADbit standardized matrix\n')
-        crm.add_experiment('test', enzyme=opts.enzyme,
+        crm.add_experiment('test',
             cell_type=opts.cell,
-            identifier=opts.identifier, # general descriptive fields
             project=opts.project, # user descriptions
             resolution=opts.reso,
             norm_data=opts.matrix)
     
-    if opts.beg:
+    if opts.beg is not None:
         if opts.beg - opts.offset > crm.experiments[-1].size:
             raise Exception('ERROR: beg parameter is larger than chromosome size.')
         if opts.end - opts.offset > crm.experiments[-1].size:

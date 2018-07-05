@@ -95,7 +95,8 @@ class HiCBasedRestraints(object):
                 ('ERROR: we must prevent you from doing this for the safe of our' +
                  'universe...\nIn this case, maxdist must be higher than %s\n' +
                  '   -> resolution times scale -- %s*%s)') % (
-                    self.CONFIG['lowrdist'], self.resolution, self.CONFIG['scale']))
+                    self.CONFIG['lowrdist']*self.resolution*self.CONFIG['scale'],
+                    self.resolution, self.CONFIG['scale']))
     
         # print 'config:', self.CONFIG
         # get SLOPE and regression for all particles of the z-score data
