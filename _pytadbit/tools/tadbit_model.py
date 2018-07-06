@@ -277,7 +277,8 @@ def optimization_distributed(exp, opts, outdir, job_file_handler = None,
             "Optimization", "UpFreq", "LowFreq", "MaxDist",
             "scale", "cutoff", "| Correlation"))
     for m, u, l, s in product(opts.maxdist, opts.upfreq, opts.lowfreq, opts.scale):
-        muls = tuple(map(my_round, (m, u, l, s)))
+        m, u, l, s = map(my_round, (m, u, l, s))
+        muls = tuple((m, u, l, s))
         mkdir(path.join(outdir, 'cfg_%s_%s_%s_%s' % muls))
         prepare_distributed_jobs(exp, opts, m, u, l, s, outdir)
 
@@ -285,6 +286,7 @@ def optimization_distributed(exp, opts, outdir, job_file_handler = None,
     best = ({'corr': None}, [None, None, None, None, None])
     results = {}
     for m, u, l, s in product(opts.maxdist, opts.upfreq, opts.lowfreq, opts.scale):
+        m, u, l, s = map(my_round, (m, u, l, s))
         muls_results, _ = run_distributed_jobs(opts, m, u, l, s, outdir, job_file_handler, 
                             script_cmd = script_cmd, script_args = script_args, verbose=verbose)
         results.update(muls_results)
@@ -1060,9 +1062,9 @@ def check_options(opts):
     def _load_range(range_str, num=float):
         try:
             beg, end, step = map(num, range_str[0].split(':'))
-            return tuple(arange(beg, end + step, step))
+            return tuple([round(x,2) for x in arange(beg, end + step, step)])
         except (AttributeError, ValueError):
-            return tuple([num(v) for v in range_str])
+            return tuple([round(num(v),2) for v in range_str])
 
     opts.scale   = _load_range(opts.scale)
     opts.maxdist = _load_range(opts.maxdist, num=int)
