@@ -415,7 +415,7 @@ def run(opts):
                                     script_cmd = opts.script_cmd, script_args = opts.script_args)
             if not opts.job_list and "optimization plot" in opts.analyze_list:
                 if optpar:
-                    optimizer = IMPoptimizer(exp, opts.beg + 1 - opts.offset, opts.end + 1 - opts.offset)
+                    optimizer = IMPoptimizer(exp, opts.beg - opts.offset, opts.end - opts.offset)
                     optimizer.scale_range    = [i for i in opts.scale]
                     optimizer.kbending_range = [0.0]
                     optimizer.maxdist_range  = [i for i in opts.maxdist]
