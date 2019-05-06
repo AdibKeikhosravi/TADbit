@@ -153,8 +153,20 @@ def run(opts):
 
     if opts.matrix or opts.plot:
         bamfile = AlignmentFile(mreads, 'rb')
-        sections = OrderedDict(zip(bamfile.references,
-                                   [x for x in bamfile.lengths]))
+        bam_refs = bamfile.references
+        bam_lengths = bamfile.lengths
+        if opts.chr_name:
+            bam_refs_idx = [bam_refs.index(chr_ord)
+                            for chr_ord in opts.chr_name if chr_ord in bam_refs]
+            if not bam_refs_idx :
+                raise Exception('''ERROR: Wrong number of chromosomes in chr_order.
+                    Found %s in bam file \n''' % (' '.join(bam_refs)))
+            bam_refs = [bam_ref for bam_ref in [bam_refs[bam_ref_idx]
+                                                  for bam_ref_idx in bam_refs_idx]]
+            bam_lengths = [bam_len for bam_len in [bam_lengths[bam_ref_idx]
+                                                     for bam_ref_idx in bam_refs_idx]]
+        sections = OrderedDict(zip(bam_refs,
+                                   [x for x in bam_lengths]))
         total = 0
         section_pos = OrderedDict()
         for crm in sections:
@@ -174,7 +186,8 @@ def run(opts):
                     tmpdir=tmpdir, ncpus=opts.cpus,
                     return_headers=True,
                     nchunks=opts.nchunks, verbose=not opts.quiet,
-                    clean=clean, max_size=max_size)
+                    clean=clean, max_size=max_size,
+                    chr_order=opts.chr_name)
             except NotImplementedError:
                 if norm == "raw&decay":
                     warn('WARNING: raw&decay normalization not implemented '
@@ -540,6 +553,11 @@ def populate_args(parser):
                         If higher than 1, tasks with multi-threading
                         capabilities will enabled (if 0 all available)
                         cores will be used''')
+
+    glopts.add_argument('--chr_name', dest='chr_name', metavar="STR", nargs='+',
+                        default=None, type=str,
+                        help='''[fasta header] chromosome name(s). Order of chromosmes
+                        in the output matrices.''')
 
     outopt.add_argument('--matrix', dest='matrix', action='store_true',
                         default=False,
